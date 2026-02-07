@@ -4,6 +4,7 @@ Flask + 서버 사이드 Selenium(위택스) / requests(ETAX)
 """
 
 import re
+import ssl
 import time
 import traceback
 
@@ -11,6 +12,7 @@ import requests as http_requests
 import urllib3
 from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, jsonify
+from requests.adapters import HTTPAdapter
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import (
@@ -19,6 +21,25 @@ from selenium.common.exceptions import (
 )
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class _LegacySSLAdapter(HTTPAdapter):
+    """ETAX 서버의 약한 DH 키를 허용하기 위한 커스텀 SSL 어댑터."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _etax_session():
+    """ETAX용 requests.Session을 생성한다."""
+    s = http_requests.Session()
+    s.mount("https://", _LegacySSLAdapter())
+    return s
 
 app = Flask(__name__)
 
@@ -481,7 +502,8 @@ ETAX_TSJ = {
 
 def etax_fetch_dong_list():
     """ETAX VIEW 페이지에서 자치구별 법정동 목록을 파싱한다."""
-    resp = http_requests.get(ETAX_VIEW_URL, headers=ETAX_HEADERS, verify=False, timeout=15)
+    sess = _etax_session()
+    resp = sess.get(ETAX_VIEW_URL, headers=ETAX_HEADERS, verify=False, timeout=15)
     html = resp.content.decode("euc-kr", errors="replace")
     dong_map = {}
     for sigu_name, sigu_code in ETAX_SIGU.items():
@@ -516,7 +538,8 @@ def etax_search(sigu_code, hdong_code, bonbun, bubun="",
         "r_bonbun": "", "r_bubun": "", "r_dong": "", "r_hosu": "",
         "r_gwapo": "", "r_area_total": "", "r_gwapo_year": "",
     }
-    resp = http_requests.post(
+    sess = _etax_session()
+    resp = sess.post(
         ETAX_TRAN_URL, data=data, headers=ETAX_HEADERS, verify=False, timeout=15,
     )
     html = resp.content.decode("euc-kr", errors="replace")
