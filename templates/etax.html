@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>서울시 ETAX 주택외건물 시가표준액 조회</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+            background: #f0f4f8;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            padding: 40px;
+            max-width: 640px;
+            width: 100%;
+        }
+        h1 {
+            color: #1a365d;
+            font-size: 22px;
+            margin-bottom: 6px;
+            text-align: center;
+        }
+        .subtitle {
+            color: #718096;
+            font-size: 13px;
+            text-align: center;
+            margin-bottom: 28px;
+        }
+        .nav-link {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .nav-link a {
+            color: #3182ce;
+            font-size: 13px;
+            text-decoration: underline;
+        }
+        .form-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        .form-group.full { flex: 0 0 100%; }
+        label {
+            display: block;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+        select, input[type="text"] {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+            background: #fff;
+        }
+        select:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #4299e1;
+        }
+        .btn {
+            width: 100%;
+            padding: 14px;
+            background: #2b6cb0;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 8px;
+        }
+        .btn:hover { background: #2c5282; }
+        .error {
+            background: #fff5f5;
+            color: #c53030;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #feb2b2;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        .help {
+            color: #a0aec0;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>서울시 ETAX 주택외건물 시가표준액 조회</h1>
+        <p class="subtitle">서울 지역 전용 - 서울특별시 이택스에서 주택외건물의 시가표준액을 조회합니다</p>
+
+        <div class="nav-link">
+            <a href="/">&larr; 서울 외 지역: 위택스 시가표준액 조회로 이동</a>
+        </div>
+
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="/etax/search" id="etaxForm">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="gwapo_year">기준연도</label>
+                    <select name="gwapo_year" id="gwapo_year">
+                        <option value="">전체</option>
+                        {% for y in years %}
+                        <option value="{{ y }}">{{ y }}년</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="tsj_gubun">번지구분</label>
+                    <select name="tsj_gubun" id="tsj_gubun">
+                        {% for name, code in tsj_list.items() %}
+                        <option value="{{ code }}" {% if code == '1' %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="sigu_cd">자치구</label>
+                    <select name="sigu_cd" id="sigu_cd" required>
+                        <option value="">-- 선택 --</option>
+                        {% for name, code in sigu_list %}
+                        <option value="{{ code }}">{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="hdong_cd">법정동</label>
+                    <select name="hdong_cd" id="hdong_cd" required>
+                        <option value="">-- 자치구를 먼저 선택 --</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="bonbun">본번 (필수)</label>
+                    <input type="text" name="bonbun" id="bonbun" maxlength="4"
+                           placeholder="예) 1" required>
+                </div>
+                <div class="form-group">
+                    <label for="bubun">부번</label>
+                    <input type="text" name="bubun" id="bubun" maxlength="4"
+                           placeholder="선택">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="dong">동</label>
+                    <input type="text" name="dong" id="dong"
+                           placeholder="선택">
+                </div>
+                <div class="form-group">
+                    <label for="hosu">호수</label>
+                    <input type="text" name="hosu" id="hosu"
+                           placeholder="선택">
+                </div>
+            </div>
+
+            <button type="submit" class="btn">조회하기</button>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('sigu_cd').addEventListener('change', function() {
+            var code = this.value;
+            var sel = document.getElementById('hdong_cd');
+            sel.innerHTML = '<option value="">불러오는 중...</option>';
+            if (!code) {
+                sel.innerHTML = '<option value="">-- 자치구를 먼저 선택 --</option>';
+                return;
+            }
+            fetch('/etax/dongs?sigu=' + code)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    sel.innerHTML = '<option value="">-- 선택 --</option>';
+                    data.forEach(function(item) {
+                        var opt = document.createElement('option');
+                        opt.value = item[0];
+                        opt.textContent = item[1];
+                        sel.appendChild(opt);
+                    });
+                })
+                .catch(function() {
+                    sel.innerHTML = '<option value="">불러오기 실패</option>';
+                });
+        });
+
+        // 숫자만 입력
+        ['bonbun','bubun'].forEach(function(id) {
+            document.getElementById(id).addEventListener('input', function() {
+                this.value = this.value.replace(/[^0-9]/g, '');
+            });
+        });
+    </script>
+</body>
+</html>

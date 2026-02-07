@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>조회 결과 - 서울시 ETAX 주택외건물 시가표준액</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+            background: #f0f4f8;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            padding: 40px;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #1a365d;
+            font-size: 22px;
+            margin-bottom: 20px;
+        }
+        .query-info {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #4a5568;
+            line-height: 1.8;
+        }
+        .query-info strong { color: #2d3748; }
+        .error-box {
+            background: #fff5f5;
+            color: #c53030;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #feb2b2;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        .message {
+            background: #ebf8ff;
+            color: #2b6cb0;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #90cdf4;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        .count {
+            margin-bottom: 12px;
+            color: #2d3748;
+            font-weight: 600;
+            font-size: 15px;
+        }
+        .table-wrap {
+            overflow-x: auto;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        th {
+            background: #2b6cb0;
+            color: #fff;
+            padding: 10px 14px;
+            text-align: center;
+            font-weight: 600;
+            border-bottom: 2px solid #2c5282;
+        }
+        td {
+            padding: 9px 14px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #4a5568;
+            text-align: center;
+        }
+        tr:hover td { background: #f7fafc; }
+        tr.sub td {
+            background: #fafbfc;
+            color: #718096;
+            font-size: 12px;
+            border-bottom: 1px solid #edf2f7;
+        }
+        tr.sub td:first-child { text-align: right; padding-right: 8px; }
+        td.amount { text-align: right; font-family: 'Consolas', monospace; }
+        td.area { text-align: right; }
+        td.name { text-align: left; white-space: normal; max-width: 260px; }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #2b6cb0;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+            margin-right: 8px;
+        }
+        .btn:hover { background: #2c5282; }
+        .btn.secondary {
+            background: #edf2f7;
+            color: #4a5568;
+        }
+        .btn.secondary:hover { background: #e2e8f0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>주택외건물 시가표준액 조회 결과</h1>
+
+        {% if query %}
+        <div class="query-info">
+            <strong>조회 조건:</strong>
+            {{ query.sigu_name }}
+            | 본번: {{ query.bonbun }}{% if query.bubun %}-{{ query.bubun }}{% endif %}
+            | 기준연도: {{ query.year }}
+            {% if query.dong %}| 동: {{ query.dong }}{% endif %}
+            {% if query.hosu %}| 호: {{ query.hosu }}{% endif %}
+        </div>
+        {% endif %}
+
+        {% if error %}
+        <div class="error-box">{{ error }}</div>
+        {% endif %}
+
+        {% if results %}
+        <p class="count">총 {{ results|length }}건</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>번호</th>
+                        <th>연도</th>
+                        <th>번지</th>
+                        <th>동</th>
+                        <th>호수</th>
+                        <th>건물명</th>
+                        <th>시가표준액(계)</th>
+                        <th>전용면적</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in results %}
+                    <tr>
+                        <td>{{ r.no }}</td>
+                        <td>{{ r.year }}</td>
+                        <td>{{ r.lot }}</td>
+                        <td>{{ r.dong_no }}</td>
+                        <td>{{ r.ho }}</td>
+                        <td class="name">{{ r.name }}</td>
+                        <td class="amount">{{ r.total }}</td>
+                        <td class="area">{{ r.area }}</td>
+                    </tr>
+                    {% if r.building %}
+                    <tr class="sub">
+                        <td colspan="6" style="text-align:right;">건물분</td>
+                        <td class="amount">{{ r.building }}</td>
+                        <td></td>
+                    </tr>
+                    {% endif %}
+                    {% if r.land %}
+                    <tr class="sub">
+                        <td colspan="6" style="text-align:right;">토지분</td>
+                        <td class="amount">{{ r.land }}</td>
+                        <td></td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% elif not error %}
+        <div class="message">검색된 데이터가 없습니다.</div>
+        {% endif %}
+
+        <a href="/etax" class="btn">다시 조회</a>
+        <a href="/" class="btn secondary">위택스 조회로 이동</a>
+    </div>
+</body>
+</html>
