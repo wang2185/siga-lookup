@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+      font-size: 11pt;
+      color: #1e293b;
+      line-height: 1.6;
+      padding: 20mm;
+    }
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #2563eb;
+      padding-bottom: 12px;
+      margin-bottom: 20px;
+    }
+    .header h1 { font-size: 18pt; color: #2563eb; margin-bottom: 4px; }
+    .header .date { font-size: 9pt; color: #64748b; }
+    .info-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      font-size: 10pt;
+    }
+    .info-box dt { font-weight: 600; color: #64748b; font-size: 9pt; display: inline; }
+    .info-box dd { display: inline; margin-right: 20px; font-weight: 500; }
+    .section-title {
+      font-size: 13pt;
+      font-weight: 700;
+      color: #2563eb;
+      margin-top: 24px;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .source-box {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+      font-size: 8.5pt;
+      color: #1e40af;
+    }
+    .source-box strong { font-size: 9pt; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9pt;
+      margin-bottom: 16px;
+    }
+    th {
+      background: #f1f5f9;
+      padding: 6px 8px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 8.5pt;
+      color: #64748b;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    td {
+      padding: 5px 8px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .price { font-weight: 700; color: #2563eb; }
+    .footer {
+      margin-top: 30px;
+      padding-top: 12px;
+      border-top: 1px solid #e2e8f0;
+      font-size: 8pt;
+      color: #94a3b8;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>부동산 공시가격/시가표준액 통합 조회 결과</h1>
+    <div class="date">조회일시: {{ now }}</div>
+  </div>
+
+  <div class="info-box">
+    <dl>
+      <dt>조회 주소: </dt><dd>{{ auto_data.address }}</dd><br>
+      <dt>기준년도: </dt><dd>{{ auto_data.year or '최신' }}</dd>
+    </dl>
+  </div>
+
+  {% for type_key in ['land', 'apartment', 'house', 'building'] %}
+  {% if type_key in auto_data.sections %}
+  {% set section = auto_data.sections[type_key] %}
+  {% set src_key = section.get('source_key', type_key) %}
+  <div class="section-title">{{ section.label }}</div>
+
+  {% if source_info and src_key in source_info %}
+  <div class="source-box">
+    <strong>담당기관:</strong> {{ source_info[src_key].authority }} |
+    <strong>조회시스템:</strong> {{ source_info[src_key].system }}<br>
+    <strong>근거법령:</strong> {{ source_info[src_key].law }} |
+    <strong>공식사이트:</strong> {{ source_info[src_key].url }}
+  </div>
+  {% endif %}
+
+  <p style="margin-bottom:6px;font-weight:600;font-size:9.5pt;">{{ section.result.results|length }}건</p>
+
+  {% if type_key == 'land' %}
+  <table>
+    <thead>
+      <tr><th>#</th><th>기준년도</th><th>소재지</th><th>지번</th><th>공시지가 (원/m²)</th><th>면적 (m²)</th><th>총액 (원)</th><th>공시일자</th><th>지번구분</th></tr>
+    </thead>
+    <tbody>
+      {% for row in section.result.results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.get('year', '') }}</td>
+        <td>{{ row.get('location', '-') }}</td>
+        <td>{{ row.get('lot_number', '-') }}</td>
+        <td class="price">{{ '{:,}'.format(row.get('price_per_sqm', 0)|int) if row.get('price_per_sqm') else '-' }}</td>
+        <td>{{ row.get('land_area', '-') }}</td>
+        <td class="price">{{ '{:,}'.format(row.get('total_price', 0)|int) if row.get('total_price') else '-' }}</td>
+        <td>{{ row.get('announcement_date', '-') }}</td>
+        <td>{{ row.get('lot_type', '-') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% elif type_key == 'apartment' %}
+  <table>
+    <thead>
+      <tr><th>#</th><th>기준년도</th><th>건물명</th><th>주택유형</th><th>동</th><th>호</th><th>층</th><th>전용면적</th><th>공시가격 (원)</th><th>소재지</th></tr>
+    </thead>
+    <tbody>
+      {% for row in section.result.results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.get('year', '') }}</td>
+        <td>{{ row.get('building_name', '-') }}</td>
+        <td>{{ row.get('building_type', '-') }}</td>
+        <td>{{ row.get('dong', '-') }}</td>
+        <td>{{ row.get('ho', '-') }}</td>
+        <td>{{ row.get('floor', '-') }}</td>
+        <td>{{ row.get('exclusive_area', '-') }}</td>
+        <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
+        <td>{{ row.get('location', '-') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% elif type_key == 'house' %}
+  <table>
+    <thead>
+      <tr><th>#</th><th>기준년도</th><th>소재지</th><th>지번</th><th>공시가격 (원)</th><th>대지면적</th><th>건물총면적</th><th>공시일자</th></tr>
+    </thead>
+    <tbody>
+      {% for row in section.result.results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.get('year', '') }}</td>
+        <td>{{ row.get('location', '-') }}</td>
+        <td>{{ row.get('lot_number', '-') }}</td>
+        <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
+        <td>{{ row.get('land_area', '-') }}</td>
+        <td>{{ row.get('building_area', '-') }}</td>
+        <td>{{ row.get('announcement_date', '-') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% elif type_key == 'building' %}
+  <table>
+    <thead>
+      <tr><th>#</th><th>기준년도</th><th>지번</th><th>동</th><th>호</th><th>소재지</th><th>시가표준액 (원)</th><th>면적 (m²)</th></tr>
+    </thead>
+    <tbody>
+      {% for row in section.result.results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.get('year', '') }}</td>
+        <td>{{ row.get('lot', '-') }}</td>
+        <td>{{ row.get('dong_no', '-') }}</td>
+        <td>{{ row.get('ho', '-') }}</td>
+        <td>{{ row.get('name', '-') }}</td>
+        <td class="price">{{ row.get('total', '-') }}</td>
+        <td>{{ row.get('area', '-') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% endif %}{# end if type_key in auto_data.sections #}
+  {% endfor %}
+
+  <div class="footer">
+    본 자료는 각 담당기관의 공식 데이터베이스에서 API를 통해 조회한 결과입니다.<br>
+    정확한 가격은 해당 담당기관의 공식 고시를 확인하시기 바랍니다.<br>
+    조회일시: {{ now }} | 시가표준액/공시가격 조회 포털 (gongsi.estate)
+  </div>
+</body>
+</html>

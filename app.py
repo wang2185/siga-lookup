@@ -7,7 +7,7 @@ from flask import Flask, render_template, request, jsonify, session, send_file
 
 from config import Config
 from modules.base import PROPERTY_TYPES, LookupResult, SOURCE_INFO
-from modules.address import parse_address, search_juso, search_vworld, extract_address_components
+from modules.address import parse_address, search_juso, search_vworld, extract_address_components, SIDO_MAP
 from modules.building_nonseoul import WeTaxModule
 from modules.building_seoul import (
     SeoulETaxModule, get_dong_cache, ETAX_SIGU, ETAX_TSJ,
@@ -58,7 +58,15 @@ def _resolve_address(form) -> dict:
         try:
             juso_item = json.loads(juso_data)
             addr = extract_address_components(juso_item)
-            addr["_raw"] = juso_item.get("jibunAddr", "") or juso_item.get("roadAddr", "")
+            # 전체 주소 표시: jibunAddr에 시도가 포함된 경우 우선, 아니면 roadAddr 사용
+            jibun = juso_item.get("jibunAddr", "")
+            road = juso_item.get("roadAddr", "")
+            if jibun and any(jibun.startswith(s) for s in SIDO_MAP):
+                addr["_raw"] = jibun
+            elif road:
+                addr["_raw"] = road
+            else:
+                addr["_raw"] = jibun
             addr["dong_no"] = form.get("dong_no", "")
             addr["ho_no"] = form.get("ho_no", "")
             return addr
@@ -145,11 +153,26 @@ def search():
                 result = etax_module.search(address, year, **kwargs)
                 if result.success and result.results:
                     auto_results["building"] = {
-                        "label": "주택외건물 시가표준액",
+                        "label": "주택외건물 시가표준액 (서울)",
                         "result": result,
+                        "source_key": "building_etax",
                     }
             except Exception:
                 pass
+
+        # session에 auto 결과 저장 (PDF용)
+        session["last_auto"] = {
+            "address": address.get("_raw", ""),
+            "year": year,
+            "sections": {
+                k: {
+                    "label": v["label"],
+                    "result": _result_to_dict(v["result"]),
+                    "source_key": v.get("source_key", k),
+                }
+                for k, v in auto_results.items()
+            },
+        }
 
         return render_template(
             "results/auto.html",
@@ -227,6 +250,15 @@ def download_pdf():
         return "조회 결과가 없습니다.", 400
     result = _dict_to_result(last)
     return generate_pdf_response(result)
+
+
+@app.route("/download/auto-pdf", methods=["POST"])
+def download_auto_pdf():
+    from modules.pdf import generate_auto_pdf_response
+    last_auto = session.get("last_auto")
+    if not last_auto:
+        return "조회 결과가 없습니다.", 400
+    return generate_auto_pdf_response(last_auto)
 
 
 # ─── 주소 API ───

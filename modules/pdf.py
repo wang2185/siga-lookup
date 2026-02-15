@@ -35,9 +35,11 @@ def generate_pdf_response(result, filename=None):
     if not WEASYPRINT_AVAILABLE:
         return make_response("WeasyPrint가 설치되지 않았습니다.", 500)
 
+    from urllib.parse import quote
+
     if not filename:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"시가조회_{timestamp}.pdf"
+        filename = f"siga_{timestamp}.pdf"
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     source_info = SOURCE_INFO.get(result.property_type, {})
@@ -52,7 +54,43 @@ def generate_pdf_response(result, filename=None):
         url_fetcher=_safe_url_fetcher,
     ).write_pdf()
 
+    display_name = quote(f"시가조회_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
     response = make_response(pdf_bytes)
     response.headers["Content-Type"] = "application/pdf"
-    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename={filename}; filename*=UTF-8''{display_name}"
+    )
+    return response
+
+
+def generate_auto_pdf_response(auto_data, filename=None):
+    """통합 조회 결과를 PDF로 변환하여 Flask Response를 반환한다."""
+    from .base import SOURCE_INFO
+    from urllib.parse import quote
+
+    if not WEASYPRINT_AVAILABLE:
+        return make_response("WeasyPrint가 설치되지 않았습니다.", 500)
+
+    if not filename:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"siga_auto_{timestamp}.pdf"
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    html_string = render_template(
+        "pdf/auto_pdf.html",
+        auto_data=auto_data,
+        now=now,
+        source_info=SOURCE_INFO,
+    )
+    pdf_bytes = HTML(
+        string=html_string,
+        url_fetcher=_safe_url_fetcher,
+    ).write_pdf()
+
+    display_name = quote(f"통합조회_{timestamp}.pdf")
+    response = make_response(pdf_bytes)
+    response.headers["Content-Type"] = "application/pdf"
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename={filename}; filename*=UTF-8''{display_name}"
+    )
     return response

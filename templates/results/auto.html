@@ -22,13 +22,26 @@
 
   <div class="result-info" style="margin-top:12px;font-size:0.85rem;">
     <p style="font-weight:600;margin-bottom:6px;">데이터 출처</p>
-    {% for key in auto_results %}
-    {% if source_info and source_info[key] %}
+    {% if auto_results.land and source_info.land %}
     <div style="margin-bottom:4px;">
-      <strong>{{ source_info[key].name }}</strong>: {{ source_info[key].authority }} ({{ source_info[key].system }}) / {{ source_info[key].law }}
+      <strong>{{ source_info.land.name }}</strong>: {{ source_info.land.authority }} ({{ source_info.land.system }}) / {{ source_info.land.law }}
     </div>
     {% endif %}
-    {% endfor %}
+    {% if auto_results.apartment and source_info.apartment %}
+    <div style="margin-bottom:4px;">
+      <strong>{{ source_info.apartment.name }}</strong>: {{ source_info.apartment.authority }} ({{ source_info.apartment.system }}) / {{ source_info.apartment.law }}
+    </div>
+    {% endif %}
+    {% if auto_results.house and source_info.house %}
+    <div style="margin-bottom:4px;">
+      <strong>{{ source_info.house.name }}</strong>: {{ source_info.house.authority }} ({{ source_info.house.system }}) / {{ source_info.house.law }}
+    </div>
+    {% endif %}
+    {% if auto_results.building and source_info.building_etax %}
+    <div style="margin-bottom:4px;">
+      <strong>{{ source_info.building_etax.name }}</strong>: {{ source_info.building_etax.authority }} ({{ source_info.building_etax.system }}) / {{ source_info.building_etax.law }}
+    </div>
+    {% endif %}
   </div>
 
   {# 토지 개별공시지가 #}
@@ -193,6 +206,11 @@
 
   <div class="btn-group">
     <a href="/" class="btn btn-secondary">다시 조회</a>
+    {% if auto_results %}
+    <form method="POST" action="/download/auto-pdf" style="flex:1;">
+      <button type="submit" class="btn btn-download" style="width:100%;">PDF 다운로드</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 {% endblock %}
