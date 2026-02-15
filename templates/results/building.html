@@ -14,7 +14,9 @@
       <dt>기준년도</dt>
       <dd>{{ result.year or '전체' }}</dd>
       <dt>데이터 출처</dt>
-      <dd>{{ result.source }}{% if result.cached %} (캐시){% endif %}</dd>
+      <dd>{% if source_info %}{{ source_info.authority }} ({{ source_info.system }}){% else %}{{ result.source }}{% endif %}{% if result.cached %} (캐시){% endif %}</dd>
+      {% if source_info %}<dt>근거법령</dt>
+      <dd>{{ source_info.law }}</dd>{% endif %}
     </dl>
   </div>
 

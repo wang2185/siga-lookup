@@ -6,7 +6,7 @@ Flask + 모듈별 조회 (WeTax/ETAX/data.go.kr/HomeTax)
 from flask import Flask, render_template, request, jsonify, session, send_file
 
 from config import Config
-from modules.base import PROPERTY_TYPES, LookupResult
+from modules.base import PROPERTY_TYPES, LookupResult, SOURCE_INFO
 from modules.address import parse_address, search_juso, search_vworld, extract_address_components
 from modules.building_nonseoul import WeTaxModule
 from modules.building_seoul import (
@@ -105,7 +105,7 @@ def search():
             property_types=PROPERTY_TYPES, years=list(range(2026, 2010, -1)),
         )
 
-    # 유형 미선택 → 자동 통합 조회 (토지/공동주택/개별주택)
+    # 유형 미선택 → 자동 통합 조회 (토지/공동주택/개별주택 + 서울 건물)
     if property_type not in PROPERTY_TYPES:
         address = _resolve_address(request.form)
         dong_no = request.form.get("dong_no", "").strip()
@@ -137,11 +137,26 @@ def search():
             except Exception:
                 pass
 
+        # 서울 주소이면 ETAX 주택외건물도 조회
+        sido = address.get("sido", "")
+        if sido in ("서울", "서울특별시"):
+            try:
+                kwargs = {"dong_no": dong_no, "ho_no": ho_no}
+                result = etax_module.search(address, year, **kwargs)
+                if result.success and result.results:
+                    auto_results["building"] = {
+                        "label": "주택외건물 시가표준액",
+                        "result": result,
+                    }
+            except Exception:
+                pass
+
         return render_template(
             "results/auto.html",
             auto_results=auto_results,
             address=address.get("_raw", ""),
             year=year,
+            source_info=SOURCE_INFO,
         )
 
     address = _resolve_address(request.form)
@@ -170,12 +185,18 @@ def search():
             property_types=PROPERTY_TYPES, years=list(range(2026, 2010, -1)),
         )
 
-    # 캐시 확인
+    # 출처 정보 (building은 서울/비서울 구분)
+    if property_type == "building":
+        src_info = SOURCE_INFO.get(
+            "building_etax" if isinstance(module, SeoulETaxModule) else "building_wetax", {}
+        )
+    else:
+        src_info = SOURCE_INFO.get(property_type, {})
     cached = lookup_cache.get(property_type, address, year)
     if cached:
         cached.cached = True
         session["last_result"] = _result_to_dict(cached)
-        return render_template(template, result=cached)
+        return render_template(template, result=cached, source_info=src_info)
 
     # ETAX용 추가 파라미터
     kwargs = {}
@@ -194,7 +215,7 @@ def search():
         lookup_cache.set(property_type, address, year, result)
 
     session["last_result"] = _result_to_dict(result)
-    return render_template(template, result=result)
+    return render_template(template, result=result, source_info=src_info)
 
 
 # ─── PDF 다운로드 ───

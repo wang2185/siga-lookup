@@ -68,11 +68,23 @@
 
   <div class="info-box">
     <dl>
-      <dt>주소: </dt><dd>{{ result.address }}</dd>
+      <dt>조회 주소: </dt><dd>{{ result.address }}</dd><br>
       <dt>기준년도: </dt><dd>{{ result.year or '전체' }}</dd>
-      <dt>출처: </dt><dd>{{ result.source }}</dd>
     </dl>
   </div>
+
+  {% if source_info %}
+  <div class="info-box" style="margin-top:8px;">
+    <p style="font-weight:700;font-size:10pt;margin-bottom:6px;color:#1e293b;">데이터 출처 및 근거</p>
+    <dl>
+      <dt>담당기관: </dt><dd>{{ source_info.authority }}</dd><br>
+      <dt>제공기관: </dt><dd>{{ source_info.provider }}</dd><br>
+      <dt>조회시스템: </dt><dd>{{ source_info.system }}</dd><br>
+      <dt>근거법령: </dt><dd>{{ source_info.law }}</dd><br>
+      <dt>공식사이트: </dt><dd>{{ source_info.url }}</dd>
+    </dl>
+  </div>
+  {% endif %}
 
   {% if result.results %}
   <p style="margin-bottom:8px;font-weight:600;font-size:10pt;">총 {{ result.results|length }}건</p>
@@ -184,8 +196,9 @@
   {% endif %}
 
   <div class="footer">
-    본 자료는 참고용이며, 정확한 공시가격은 해당 기관의 공식 발표를 확인하시기 바랍니다.<br>
-    시가 조회 포털 | {{ now }}
+    본 자료는 각 담당기관의 공식 데이터베이스에서 API를 통해 조회한 결과입니다.<br>
+    정확한 가격은 해당 담당기관의 공식 고시를 확인하시기 바랍니다.<br>
+    조회일시: {{ now }} | 시가표준액/공시가격 조회 포털 (gongsi.estate)
   </div>
 </body>
 </html>

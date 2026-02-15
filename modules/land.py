@@ -49,7 +49,7 @@ class LandPriceModule(BaseLookupModule):
             )
 
         from datetime import datetime
-        stdr_year = year or str(datetime.now().year)
+        stdr_year = year or str(datetime.now().year - 1)
 
         try:
             params = {

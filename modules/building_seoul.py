@@ -76,6 +76,9 @@ class SeoulETaxModule(BaseLookupModule):
         return "etax"
 
     def search(self, address: dict, year: str = "", **kwargs) -> LookupResult:
+        from datetime import datetime
+        if not year:
+            year = str(datetime.now().year - 1)
         sigu_code = kwargs.get("sigu_code", "")
         hdong_code = kwargs.get("hdong_code", "")
         bonbun = address.get("bonji", "")

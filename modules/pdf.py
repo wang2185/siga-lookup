@@ -30,6 +30,8 @@ def _safe_url_fetcher(url, timeout=10, ssl_context=None):
 
 def generate_pdf_response(result, filename=None):
     """조회 결과를 PDF로 변환하여 Flask Response를 반환한다."""
+    from .base import SOURCE_INFO
+
     if not WEASYPRINT_AVAILABLE:
         return make_response("WeasyPrint가 설치되지 않았습니다.", 500)
 
@@ -38,10 +40,12 @@ def generate_pdf_response(result, filename=None):
         filename = f"시가조회_{timestamp}.pdf"
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    source_info = SOURCE_INFO.get(result.property_type, {})
     html_string = render_template(
         "pdf/result_pdf.html",
         result=result,
         now=now,
+        source_info=source_info,
     )
     pdf_bytes = HTML(
         string=html_string,

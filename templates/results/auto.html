@@ -20,6 +20,17 @@
   <div class="no-results">조회 결과가 없습니다.</div>
   {% else %}
 
+  <div class="result-info" style="margin-top:12px;font-size:0.85rem;">
+    <p style="font-weight:600;margin-bottom:6px;">데이터 출처</p>
+    {% for key in auto_results %}
+    {% if source_info and source_info[key] %}
+    <div style="margin-bottom:4px;">
+      <strong>{{ source_info[key].name }}</strong>: {{ source_info[key].authority }} ({{ source_info[key].system }}) / {{ source_info[key].law }}
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+
   {# 토지 개별공시지가 #}
   {% if auto_results.land %}
   <div style="margin-top:24px;">
@@ -132,6 +143,44 @@
             <td>{{ row.get('land_area', '-') }}</td>
             <td>{{ row.get('building_area', '-') }}</td>
             <td>{{ row.get('announcement_date', '-') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {# 주택외건물 시가표준액 (서울) #}
+  {% if auto_results.building %}
+  <div style="margin-top:24px;">
+    <h2 style="font-size:1.1rem;margin-bottom:10px;color:var(--primary);">{{ auto_results.building.label }}</h2>
+    <p style="margin-bottom:8px;font-weight:600;font-size:0.9rem;">{{ auto_results.building.result.results|length }}건</p>
+    <div style="overflow-x:auto;">
+      <table class="result-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>기준년도</th>
+            <th>지번</th>
+            <th>동</th>
+            <th>호</th>
+            <th>소재지</th>
+            <th>시가표준액 (원)</th>
+            <th>면적 (m²)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in auto_results.building.result.results %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ row.get('year', '') }}</td>
+            <td>{{ row.get('lot', '-') }}</td>
+            <td>{{ row.get('dong_no', '-') }}</td>
+            <td>{{ row.get('ho', '-') }}</td>
+            <td>{{ row.get('name', '-') }}</td>
+            <td class="price">{{ row.get('total', '-') }}</td>
+            <td>{{ row.get('area', '-') }}</td>
           </tr>
           {% endfor %}
         </tbody>

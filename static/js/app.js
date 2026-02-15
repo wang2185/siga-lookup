@@ -2,7 +2,9 @@
 (function() {
   // 부동산 유형 선택
   document.querySelectorAll('.type-card').forEach(card => {
-    card.addEventListener('click', function() {
+    card.addEventListener('click', function(e) {
+      // label 내부 input 클릭으로 인한 이벤트 중복 방지
+      if (e.target.tagName === 'INPUT') return;
       const radio = this.querySelector('input[type="radio"]');
       const wasSelected = this.classList.contains('selected');
 
@@ -44,4 +46,13 @@
       }
     });
   }
+
+  // 뒤로가기/페이지 복원 시 버튼 상태 초기화
+  window.addEventListener('pageshow', function() {
+    const btn = document.querySelector('button[type="submit"]');
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('loading');
+    }
+  });
 })();

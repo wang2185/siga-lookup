@@ -30,6 +30,75 @@ PROPERTY_TYPES = {
 }
 
 
+# 법원 제출용 출처 상세 정보
+SOURCE_INFO = {
+    "land": {
+        "name": "개별공시지가",
+        "authority": "국토교통부",
+        "provider": "한국부동산원",
+        "system": "V-World 공간정보 오픈플랫폼 (vworld.kr)",
+        "law": "부동산 가격공시에 관한 법률 제10조",
+        "url": "https://www.realtyprice.kr",
+    },
+    "apartment": {
+        "name": "공동주택 공시가격",
+        "authority": "국토교통부",
+        "provider": "한국부동산원",
+        "system": "V-World 공간정보 오픈플랫폼 (vworld.kr)",
+        "law": "부동산 가격공시에 관한 법률 제18조",
+        "url": "https://www.realtyprice.kr",
+    },
+    "house": {
+        "name": "개별주택 공시가격",
+        "authority": "국토교통부",
+        "provider": "한국부동산원",
+        "system": "V-World 공간정보 오픈플랫폼 (vworld.kr)",
+        "law": "부동산 가격공시에 관한 법률 제16조",
+        "url": "https://www.realtyprice.kr",
+    },
+    "building": {
+        "name": "주택외건물 시가표준액",
+        "authority": "행정안전부 / 지방자치단체",
+        "provider": "위택스(WeTax) / 서울시 ETAX",
+        "system": "WeTax (wetax.go.kr) / 서울시 ETAX (etax.seoul.go.kr)",
+        "law": "지방세법 제4조 (시가표준액)",
+        "url": "https://www.wetax.go.kr",
+    },
+    "building_etax": {
+        "name": "주택외건물 시가표준액 (서울)",
+        "authority": "서울특별시",
+        "provider": "서울특별시 ETAX",
+        "system": "서울시 ETAX (etax.seoul.go.kr)",
+        "law": "지방세법 제4조 (시가표준액)",
+        "url": "https://etax.seoul.go.kr",
+    },
+    "building_wetax": {
+        "name": "주택외건물 시가표준액",
+        "authority": "행정안전부",
+        "provider": "위택스(WeTax)",
+        "system": "WeTax (wetax.go.kr)",
+        "law": "지방세법 제4조 (시가표준액)",
+        "url": "https://www.wetax.go.kr",
+    },
+    "commercial": {
+        "name": "상업용 건물 기준시가",
+        "authority": "국세청",
+        "provider": "국세청 홈택스",
+        "system": "국세청 홈택스 (hometax.go.kr)",
+        "law": "소득세법 제99조, 상속세 및 증여세법 제61조",
+        "url": "https://www.hometax.go.kr",
+    },
+    "factory": {
+        "name": "공장 시가표준액",
+        "authority": "행정안전부",
+        "provider": "위택스(WeTax)",
+        "system": "WeTax (wetax.go.kr)",
+        "law": "지방세법 제4조 (시가표준액)",
+        "url": "https://www.wetax.go.kr",
+    },
+}
+
+
 class BaseLookupModule(ABC):
 
     @abstractmethod
