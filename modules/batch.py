@@ -270,15 +270,24 @@ def _cleanup_uploads(keep_id: str = ""):
 
 # ─── 병합 셀 처리 ───
 
-def _resolve_merged_cells(ws) -> list[list]:
+def _resolve_merged_cells(ws, skip_cols: set[int] | None = None) -> list[list]:
     """워크시트의 모든 행을 읽되, 병합된 셀의 값을 채운다.
 
     openpyxl read_only=False 모드에서 사용해야 한다.
     병합된 셀 범위 내의 모든 셀에 상위 좌측 셀의 값을 복사한다.
+
+    Args:
+        ws: openpyxl 워크시트
+        skip_cols: 병합 해제를 건너뛸 컬럼 인덱스 (0-based). 지분처럼
+                   행마다 독립적이어야 하는 컬럼에 사용.
     """
+    skip_cols_1based = {c + 1 for c in (skip_cols or set())}
+
     # 병합 범위 매핑: (row, col) → 상위 좌측 셀 값
     merge_map = {}
     for merge_range in ws.merged_cells.ranges:
+        if merge_range.min_col in skip_cols_1based:
+            continue
         top_val = ws.cell(merge_range.min_row, merge_range.min_col).value
         for r in range(merge_range.min_row, merge_range.max_row + 1):
             for c in range(merge_range.min_col, merge_range.max_col + 1):
@@ -344,7 +353,9 @@ def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes))
     ws = wb.active
-    all_rows = _resolve_merged_cells(ws)
+    # 지분 컬럼은 병합 셀 해제에서 제외 (행마다 독립적이어야 함)
+    skip_cols = {share_col} if share_col is not None else None
+    all_rows = _resolve_merged_cells(ws, skip_cols=skip_cols)
 
     results = []
     for idx, vals in enumerate(all_rows):
@@ -362,7 +373,7 @@ def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
         if year_col is not None and year_col < len(vals) and vals[year_col]:
             year = str(vals[year_col]).strip()
 
-        # 지분 파싱
+        # 지분 파싱 (병합 해제 안된 원본 값 사용)
         share_raw = ""
         share_ratio = None
         if share_col is not None and share_col < len(vals) and vals[share_col]:
