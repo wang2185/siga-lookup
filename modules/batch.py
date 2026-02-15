@@ -270,24 +270,15 @@ def _cleanup_uploads(keep_id: str = ""):
 
 # ─── 병합 셀 처리 ───
 
-def _resolve_merged_cells(ws, skip_cols: set[int] | None = None) -> list[list]:
+def _resolve_merged_cells(ws) -> list[list]:
     """워크시트의 모든 행을 읽되, 병합된 셀의 값을 채운다.
 
     openpyxl read_only=False 모드에서 사용해야 한다.
     병합된 셀 범위 내의 모든 셀에 상위 좌측 셀의 값을 복사한다.
-
-    Args:
-        ws: openpyxl 워크시트
-        skip_cols: 병합 해제를 건너뛸 컬럼 인덱스 (0-based). 지분처럼
-                   행마다 독립적이어야 하는 컬럼에 사용.
     """
-    skip_cols_1based = {c + 1 for c in (skip_cols or set())}
-
     # 병합 범위 매핑: (row, col) → 상위 좌측 셀 값
     merge_map = {}
     for merge_range in ws.merged_cells.ranges:
-        if merge_range.min_col in skip_cols_1based:
-            continue
         top_val = ws.cell(merge_range.min_row, merge_range.min_col).value
         for r in range(merge_range.min_row, merge_range.max_row + 1):
             for c in range(merge_range.min_col, merge_range.max_col + 1):
@@ -353,9 +344,46 @@ def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes))
     ws = wb.active
-    # 지분 컬럼은 병합 셀 해제에서 제외 (행마다 독립적이어야 함)
-    skip_cols = {share_col} if share_col is not None else None
-    all_rows = _resolve_merged_cells(ws, skip_cols=skip_cols)
+
+    # 지분 컬럼 원본 값을 별도로 읽어둔다 (병합 셀 해제 전).
+    # openpyxl은 병합 셀의 비-상위좌측 셀에 대해 None을 반환하므로,
+    # 병합 해제 없이 읽으면 실제 값이 있는 행만 지분이 표시된다.
+    raw_share_by_row: dict[int, str] = {}  # row_idx(0-based) → 원본 지분 텍스트
+    if share_col is not None:
+        for row_idx, row in enumerate(ws.iter_rows(values_only=False)):
+            if row_idx == 0:
+                continue  # 헤더 스킵
+            if share_col < len(row):
+                cell = row[share_col]
+                if cell.value is None:
+                    continue
+                val = cell.value
+                if isinstance(val, str):
+                    # 텍스트 — 그대로 사용 ("8/50", "50%" 등)
+                    text = val.strip()
+                    if text:
+                        raw_share_by_row[row_idx] = text
+                elif isinstance(val, (int, float)):
+                    # 숫자 — Excel이 분수를 숫자로 저장한 경우
+                    nfmt = cell.number_format or ""
+                    fixed_denom = re.search(r'/\s*(\d+)', nfmt)
+                    if fixed_denom:
+                        # 고정 분모 포맷 (# ??/50 등) → 원본 분수 복원
+                        denom = int(fixed_denom.group(1))
+                        numer = round(float(val) * denom)
+                        raw_share_by_row[row_idx] = f"{numer}/{denom}"
+                    elif '/' in nfmt:
+                        # 일반 분수 포맷 (# ?/? 등) → Fraction (Excel도 간략화함)
+                        from fractions import Fraction
+                        frac = Fraction(float(val)).limit_denominator(1000)
+                        raw_share_by_row[row_idx] = f"{frac.numerator}/{frac.denominator}"
+                    else:
+                        # 일반 숫자 — 문자열 그대로
+                        text = str(val).strip()
+                        if text:
+                            raw_share_by_row[row_idx] = text
+
+    all_rows = _resolve_merged_cells(ws)
 
     results = []
     for idx, vals in enumerate(all_rows):
@@ -373,12 +401,9 @@ def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
         if year_col is not None and year_col < len(vals) and vals[year_col]:
             year = str(vals[year_col]).strip()
 
-        # 지분 파싱 (병합 해제 안된 원본 값 사용)
-        share_raw = ""
-        share_ratio = None
-        if share_col is not None and share_col < len(vals) and vals[share_col]:
-            share_raw = str(vals[share_col]).strip()
-            share_ratio = parse_share(share_raw)
+        # 지분 파싱 — 병합 해제 전 원본 값만 사용 (전이 방지)
+        share_raw = raw_share_by_row.get(idx, "")
+        share_ratio = parse_share(share_raw) if share_raw else None
 
         # 소유자
         owner = ""
