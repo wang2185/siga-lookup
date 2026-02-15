@@ -94,22 +94,24 @@ def parse_share(text: str) -> float | None:
     if not text:
         return None
 
-    # 분수: 1/2, 3/10
+    # 분수: 1/2, 3/10 (분자 < 분모 일 때만 지분으로 인식)
     m = _SHARE_FRAC_RE.search(text)
     if m:
         numer, denom = int(m.group(1)), int(m.group(2))
-        if denom > 0:
+        if denom > 0 and numer < denom:
             return numer / denom
 
     # 퍼센트: 50%, 33.33%
     m = _SHARE_PCT_RE.search(text)
     if m:
-        return float(m.group(1)) / 100
+        val = float(m.group(1)) / 100
+        if 0 < val < 1:
+            return val
 
-    # 소수: 0.5, 1 (1이면 지분 없는 것과 동일)
+    # 소수: 0.5
     try:
         val = float(text)
-        if 0 < val <= 1:
+        if 0 < val < 1:
             return val
     except (ValueError, TypeError):
         pass
