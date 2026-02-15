@@ -7,7 +7,7 @@ from flask import Flask, render_template, request, jsonify, session
 
 from config import Config
 from modules.base import PROPERTY_TYPES, LookupResult
-from modules.address import parse_address, search_juso, extract_address_components
+from modules.address import parse_address, search_juso, search_vworld, extract_address_components
 from modules.building_nonseoul import WeTaxModule
 from modules.building_seoul import (
     SeoulETaxModule, get_dong_cache, ETAX_SIGU, ETAX_TSJ,
@@ -28,7 +28,7 @@ app.secret_key = Config.SECRET_KEY
 wetax_module = WeTaxModule()
 etax_module = SeoulETaxModule()
 factory_module = FactoryModule()
-land_module = LandPriceModule(api_key=Config.DATA_GO_KR_API_KEY)
+land_module = LandPriceModule(api_key=Config.VWORLD_API_KEY)
 apartment_module = ApartmentPriceModule(api_key=Config.DATA_GO_KR_API_KEY)
 house_module = HousePriceModule(api_key=Config.DATA_GO_KR_API_KEY)
 commercial_module = CommercialPriceModule()
@@ -178,7 +178,10 @@ def api_address_search():
     keyword = request.args.get("q", "").strip()
     if len(keyword) < 2:
         return jsonify({"items": []})
-    result = search_juso(keyword, Config.JUSO_API_KEY)
+    # V-World API 우선, 실패 시 Juso.go.kr 폴백
+    result = search_vworld(keyword, Config.VWORLD_API_KEY)
+    if not result.get("items"):
+        result = search_juso(keyword, Config.VWORLD_API_KEY)
     return jsonify(result)
 
 

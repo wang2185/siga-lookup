@@ -1,4 +1,4 @@
-"""주소 파싱 및 Juso.go.kr 주소 자동완성."""
+"""주소 파싱 및 V-World / Juso.go.kr 주소 자동완성."""
 
 import re
 import requests
@@ -19,6 +19,7 @@ SIDO_MAP = {
     "경상북도": "경북", "경상남도": "경남", "제주특별자치도": "제주",
 }
 
+VWORLD_SEARCH_URL = "https://api.vworld.kr/req/search"
 JUSO_API_URL = "https://business.juso.go.kr/addrlink/addrLinkApi.do"
 
 
@@ -67,6 +68,64 @@ def parse_address(addr_str: str) -> dict:
     return result
 
 
+def search_vworld(keyword: str, api_key: str, page: int = 1, count: int = 10) -> dict:
+    """V-World 검색 API로 주소를 검색한다."""
+    if not api_key or len(keyword.strip()) < 2:
+        return {"total": 0, "items": []}
+
+    params = {
+        "service": "search",
+        "request": "search",
+        "version": "2.0",
+        "query": keyword,
+        "type": "address",
+        "category": "parcel",
+        "format": "json",
+        "size": count,
+        "page": page,
+        "key": api_key,
+    }
+    try:
+        resp = requests.get(VWORLD_SEARCH_URL, params=params, timeout=10)
+        data = resp.json()
+        response = data.get("response", {})
+
+        if response.get("status") != "OK":
+            # parcel 결과 없으면 road로 재시도
+            params["category"] = "road"
+            resp = requests.get(VWORLD_SEARCH_URL, params=params, timeout=10)
+            data = resp.json()
+            response = data.get("response", {})
+
+        if response.get("status") != "OK":
+            return {"total": 0, "items": []}
+
+        record = response.get("record", {})
+        result_data = response.get("result", {})
+        items = result_data.get("items", [])
+
+        # V-World 결과를 Juso.go.kr 호환 형식으로 변환
+        converted = []
+        for item in items:
+            addr = item.get("address", {})
+            title = item.get("title", "")
+            converted.append({
+                "roadAddr": addr.get("road", title),
+                "jibunAddr": addr.get("parcel", title),
+                "bdMgtSn": item.get("id", ""),
+                "admCd": "",
+                "lnbrMnnm": "",
+                "lnbrSlno": "",
+            })
+
+        return {
+            "total": int(record.get("total", 0)),
+            "items": converted,
+        }
+    except Exception as e:
+        return {"total": 0, "items": [], "error": str(e)}
+
+
 def search_juso(keyword: str, api_key: str, page: int = 1, count: int = 10) -> dict:
     """Juso.go.kr API로 주소를 검색한다."""
     if not api_key or len(keyword.strip()) < 2:
@@ -101,7 +160,7 @@ def extract_pnu(bd_mgt_sn: str) -> str:
 
 
 def extract_address_components(juso_item: dict) -> dict:
-    """Juso.go.kr API 결과 항목에서 조회에 필요한 주소 컴포넌트를 추출한다."""
+    """Juso.go.kr 또는 V-World API 결과에서 주소 컴포넌트를 추출한다."""
     bd_mgt_sn = juso_item.get("bdMgtSn", "")
     adm_cd = juso_item.get("admCd", "")
 

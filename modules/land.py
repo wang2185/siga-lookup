@@ -1,10 +1,10 @@
-"""토지 개별공시지가 조회 — data.go.kr API."""
+"""토지 개별공시지가 조회 — V-World API."""
 
 import requests
 
 from .base import BaseLookupModule, LookupResult
 
-API_URL = "http://apis.data.go.kr/1611000/nsdi/IndvdLandPriceService/attr/getIndvdLandPriceAttr"
+API_URL = "https://api.vworld.kr/ned/data/getIndvdLandPriceAttr"
 
 
 class LandPriceModule(BaseLookupModule):
@@ -22,7 +22,7 @@ class LandPriceModule(BaseLookupModule):
 
     @property
     def source_name(self) -> str:
-        return "data.go.kr"
+        return "V-World"
 
     def search(self, address: dict, year: str = "", **kwargs) -> LookupResult:
         if not self.api_key:
@@ -31,17 +31,21 @@ class LandPriceModule(BaseLookupModule):
                 property_type_label=self.property_type_label,
                 address=address.get("_raw", ""), year=year,
                 source=self.source_name,
-                error="공공데이터포털 API 키가 설정되지 않았습니다.",
+                error="V-World API 키가 설정되지 않았습니다.",
             )
 
         pnu = address.get("pnu", "")
-        if not pnu:
+        adm_cd = address.get("adm_cd", "")
+
+        # PNU가 없으면 법정동코드(10자리)로 시도
+        search_pnu = pnu or adm_cd
+        if not search_pnu:
             return LookupResult(
                 success=False, property_type=self.property_type,
                 property_type_label=self.property_type_label,
                 address=address.get("_raw", ""), year=year,
                 source=self.source_name,
-                error="PNU(필지고유번호)를 추출할 수 없습니다. 주소를 다시 선택해주세요.",
+                error="PNU 또는 법정동코드를 추출할 수 없습니다. 주소를 자동완성에서 선택해주세요.",
             )
 
         from datetime import datetime
@@ -49,8 +53,8 @@ class LandPriceModule(BaseLookupModule):
 
         try:
             params = {
-                "serviceKey": self.api_key,
-                "pnu": pnu,
+                "key": self.api_key,
+                "pnu": search_pnu,
                 "stdrYear": stdr_year,
                 "format": "json",
                 "numOfRows": 50,
@@ -71,8 +75,10 @@ class LandPriceModule(BaseLookupModule):
                     "year": item.get("stdrYear", ""),
                     "price_per_sqm": item.get("pblntfPclnd", ""),
                     "announcement_date": item.get("pblntfDe", ""),
-                    "land_area": item.get("lndpclAr", ""),
-                    "land_use": item.get("lndcgrCodeNm", ""),
+                    "location": item.get("ldCodeNm", ""),
+                    "lot_number": item.get("mnnmSlno", ""),
+                    "lot_type": item.get("regstrSeCodeNm", ""),
+                    "standard_land": item.get("stdLandAt", ""),
                 })
 
             return LookupResult(
