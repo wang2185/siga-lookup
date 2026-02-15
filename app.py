@@ -467,12 +467,18 @@ def batch_parse():
     else:
         share_col = None
 
+    owner_col = data.get("owner_col")
+    if owner_col is not None and owner_col != "":
+        owner_col = int(owner_col)
+    else:
+        owner_col = None
+
     default_year = data.get("default_year", "")
 
     try:
         parsed = parse_addresses_from_excel(
             cache.file_bytes, address_col, year_col, default_year,
-            share_col=share_col,
+            share_col=share_col, owner_col=owner_col,
         )
         cache.parsed_addresses = parsed
         cache.default_year = default_year

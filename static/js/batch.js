@@ -10,6 +10,7 @@
 
   const addressColSel = document.getElementById("addressCol");
   const yearColSel = document.getElementById("yearCol");
+  const ownerColSel = document.getElementById("ownerCol");
   const shareColSel = document.getElementById("shareCol");
   const defaultYearSel = document.getElementById("defaultYear");
   const previewTableWrapper = document.getElementById("previewTableWrapper");
@@ -157,14 +158,17 @@
   function populateColumnSelects(headers) {
     addressColSel.innerHTML = '<option value="">-- 주소 컬럼을 선택하세요 --</option>';
     yearColSel.innerHTML = '<option value="">-- 사용 안함 --</option>';
+    ownerColSel.innerHTML = '<option value="">-- 사용 안함 --</option>';
     shareColSel.innerHTML = '<option value="">-- 사용 안함 --</option>';
 
     var addrAutoIdx = -1;
     var yearAutoIdx = -1;
+    var ownerAutoIdx = -1;
     var shareAutoIdx = -1;
 
     var addrKeywords = ["주소", "소재지", "지번", "도로명", "address", "addr", "위치", "소재"];
     var yearKeywords = ["년도", "연도", "year", "기준"];
+    var ownerKeywords = ["소유자", "성명", "이름", "name", "owner", "납세자", "권리자", "상속인"];
     var shareKeywords = ["지분", "share", "持分", "비율", "소유비율", "ownership"];
 
     headers.forEach(function (h, i) {
@@ -172,20 +176,12 @@
       var label = h ? escapeHtml(h) : "(컬럼 " + colLetter + ")";
       var displayLabel = colLetter + ": " + label;
 
-      var optA = document.createElement("option");
-      optA.value = i;
-      optA.textContent = displayLabel;
-      addressColSel.appendChild(optA);
-
-      var optY = document.createElement("option");
-      optY.value = i;
-      optY.textContent = displayLabel;
-      yearColSel.appendChild(optY);
-
-      var optS = document.createElement("option");
-      optS.value = i;
-      optS.textContent = displayLabel;
-      shareColSel.appendChild(optS);
+      [addressColSel, yearColSel, ownerColSel, shareColSel].forEach(function (sel) {
+        var opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = displayLabel;
+        sel.appendChild(opt);
+      });
 
       // 자동 감지
       var lower = (h || "").toLowerCase();
@@ -199,6 +195,11 @@
           if (lower.indexOf(yearKeywords[k]) >= 0) { yearAutoIdx = i; break; }
         }
       }
+      if (ownerAutoIdx < 0) {
+        for (var k = 0; k < ownerKeywords.length; k++) {
+          if (lower.indexOf(ownerKeywords[k]) >= 0) { ownerAutoIdx = i; break; }
+        }
+      }
       if (shareAutoIdx < 0) {
         for (var k = 0; k < shareKeywords.length; k++) {
           if (lower.indexOf(shareKeywords[k]) >= 0) { shareAutoIdx = i; break; }
@@ -206,10 +207,9 @@
       }
     });
 
-    if (addrAutoIdx >= 0) {
-      addressColSel.value = addrAutoIdx;
-    }
+    if (addrAutoIdx >= 0) addressColSel.value = addrAutoIdx;
     if (yearAutoIdx >= 0) yearColSel.value = yearAutoIdx;
+    if (ownerAutoIdx >= 0) ownerColSel.value = ownerAutoIdx;
     if (shareAutoIdx >= 0) shareColSel.value = shareAutoIdx;
 
     // 주소 컬럼 미선택 시 분석 버튼 비활성화
@@ -230,26 +230,27 @@
 
     var addrIdx = addressColSel.value !== "" ? parseInt(addressColSel.value, 10) : -1;
     var yearIdx = yearColSel.value !== "" ? parseInt(yearColSel.value, 10) : -1;
+    var ownerIdx = ownerColSel.value !== "" ? parseInt(ownerColSel.value, 10) : -1;
     var shareIdx = shareColSel.value !== "" ? parseInt(shareColSel.value, 10) : -1;
+
+    var colStyles = {};
+    if (addrIdx >= 0) colStyles[addrIdx] = {th: "background:#dbeafe;color:var(--primary);font-weight:700;", td: "background:#eff6ff;"};
+    if (yearIdx >= 0) colStyles[yearIdx] = {th: "background:#f0fdf4;color:var(--success);font-weight:700;", td: "background:#f0fdf4;"};
+    if (ownerIdx >= 0) colStyles[ownerIdx] = {th: "background:#fdf2f8;color:#be185d;font-weight:700;", td: "background:#fdf2f8;"};
+    if (shareIdx >= 0) colStyles[shareIdx] = {th: "background:#fff7ed;color:var(--warning);font-weight:700;", td: "background:#fff7ed;"};
 
     var html = "<thead><tr>";
     headers.forEach(function (h, i) {
-      var cls = "";
-      if (i === addrIdx) cls = ' style="background:#dbeafe;color:var(--primary);font-weight:700;"';
-      else if (i === yearIdx) cls = ' style="background:#f0fdf4;color:var(--success);font-weight:700;"';
-      else if (i === shareIdx) cls = ' style="background:#fff7ed;color:var(--warning);font-weight:700;"';
-      html += "<th" + cls + ">" + escapeHtml(h || "") + "</th>";
+      var s = colStyles[i] ? ' style="' + colStyles[i].th + '"' : "";
+      html += "<th" + s + ">" + escapeHtml(h || "") + "</th>";
     });
     html += "</tr></thead><tbody>";
 
     rows.forEach(function (row) {
       html += "<tr>";
       row.forEach(function (cell, i) {
-        var cls = "";
-        if (i === addrIdx) cls = ' style="background:#eff6ff;"';
-        else if (i === yearIdx) cls = ' style="background:#f0fdf4;"';
-        else if (i === shareIdx) cls = ' style="background:#fff7ed;"';
-        html += "<td" + cls + ">" + escapeHtml(cell || "") + "</td>";
+        var s = colStyles[i] ? ' style="' + colStyles[i].td + '"' : "";
+        html += "<td" + s + ">" + escapeHtml(cell || "") + "</td>";
       });
       html += "</tr>";
     });
@@ -264,6 +265,9 @@
     if (uploadData) renderPreviewTable(uploadData.headers, uploadData.preview);
   });
   yearColSel.addEventListener("change", function () {
+    if (uploadData) renderPreviewTable(uploadData.headers, uploadData.preview);
+  });
+  ownerColSel.addEventListener("change", function () {
     if (uploadData) renderPreviewTable(uploadData.headers, uploadData.preview);
   });
   shareColSel.addEventListener("change", function () {
@@ -290,6 +294,7 @@
           upload_id: uploadId,
           address_col: parseInt(addressColSel.value, 10),
           year_col: yearColSel.value !== "" ? parseInt(yearColSel.value, 10) : null,
+          owner_col: ownerColSel.value !== "" ? parseInt(ownerColSel.value, 10) : null,
           share_col: shareColSel.value !== "" ? parseInt(shareColSel.value, 10) : null,
           default_year: defaultYearSel.value,
         }),
@@ -329,13 +334,44 @@
       splitBanner.style.display = "none";
     }
 
+    var hasOwner = data.addresses.some(function (a) { return a.owner; });
+    var hasShare = data.addresses.some(function (a) { return a.share_display; });
+
+    // 동적 테이블 헤더
+    var headHtml = "<th>#</th>";
+    if (hasOwner) headHtml += "<th>소유자</th>";
+    headHtml += "<th>주소</th><th>기준년도</th>";
+    if (hasShare) headHtml += "<th>지분</th>";
+    headHtml += "<th>원본행</th>";
+    document.getElementById("addressTableHead").innerHTML = headHtml;
+
+    // 소유자가 있으면 소유자별 정렬
+    var sorted = data.addresses.slice();
+    if (hasOwner) {
+      sorted.sort(function (a, b) {
+        var oa = a.owner || "", ob = b.owner || "";
+        if (oa < ob) return -1;
+        if (oa > ob) return 1;
+        return a.original_row - b.original_row;
+      });
+    }
+
     var html = "";
-    data.addresses.forEach(function (a, i) {
+    var prevOwner = null;
+    sorted.forEach(function (a, i) {
+      // 소유자 구분선
+      if (hasOwner && a.owner !== prevOwner && prevOwner !== null) {
+        var colSpan = 4 + (hasOwner ? 1 : 0) + (hasShare ? 1 : 0);
+        html += '<tr><td colspan="' + colSpan + '" style="padding:2px;background:var(--border);"></td></tr>';
+      }
+      prevOwner = a.owner;
+
       html += "<tr>";
       html += "<td>" + (i + 1) + "</td>";
+      if (hasOwner) html += "<td>" + escapeHtml(a.owner || "") + "</td>";
       html += "<td>" + escapeHtml(a.address) + "</td>";
       html += "<td>" + escapeHtml(a.year || "") + "</td>";
-      html += "<td>" + escapeHtml(a.share_display || "") + "</td>";
+      if (hasShare) html += "<td>" + escapeHtml(a.share_display || "") + "</td>";
       html += "<td>" + a.original_row + "</td>";
       html += "</tr>";
     });

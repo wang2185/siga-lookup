@@ -265,25 +265,56 @@ def _cleanup_uploads(keep_id: str = ""):
         pass
 
 
+# ─── 병합 셀 처리 ───
+
+def _resolve_merged_cells(ws) -> list[list]:
+    """워크시트의 모든 행을 읽되, 병합된 셀의 값을 채운다.
+
+    openpyxl read_only=False 모드에서 사용해야 한다.
+    병합된 셀 범위 내의 모든 셀에 상위 좌측 셀의 값을 복사한다.
+    """
+    # 병합 범위 매핑: (row, col) → 상위 좌측 셀 값
+    merge_map = {}
+    for merge_range in ws.merged_cells.ranges:
+        top_val = ws.cell(merge_range.min_row, merge_range.min_col).value
+        for r in range(merge_range.min_row, merge_range.max_row + 1):
+            for c in range(merge_range.min_col, merge_range.max_col + 1):
+                if (r, c) != (merge_range.min_row, merge_range.min_col):
+                    merge_map[(r, c)] = top_val
+
+    rows = []
+    for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        vals = list(row)
+        # 병합된 셀 값 채우기
+        for c_idx in range(len(vals)):
+            key = (row_idx, c_idx + 1)  # 1-based
+            if key in merge_map:
+                vals[c_idx] = merge_map[key]
+        rows.append(vals)
+
+    return rows
+
+
 # ─── 엑셀 미리보기 ───
 
 def preview_excel(file_bytes: bytes) -> dict:
     """엑셀 파일의 헤더행 + 데이터 행 수 + 미리보기 5행을 반환한다."""
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes))
     ws = wb.active
+    all_rows = _resolve_merged_cells(ws)
 
     headers = []
     preview_rows = []
     row_count = 0
 
-    for idx, row in enumerate(ws.iter_rows(values_only=True)):
-        vals = [str(c) if c is not None else "" for c in row]
+    for idx, vals in enumerate(all_rows):
+        str_vals = [str(c) if c is not None else "" for c in vals]
         if idx == 0:
-            headers = vals
+            headers = str_vals
             continue
         row_count += 1
         if len(preview_rows) < 5:
-            preview_rows.append(vals)
+            preview_rows.append(str_vals)
 
     wb.close()
     return {
@@ -298,22 +329,25 @@ def preview_excel(file_bytes: bytes) -> dict:
 def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
                                year_col: int | None,
                                default_year: str,
-                               share_col: int | None = None) -> list[dict]:
+                               share_col: int | None = None,
+                               owner_col: int | None = None) -> list[dict]:
     """선택된 컬럼에서 주소를 추출·분리하고 결과 리스트를 반환한다.
 
+    병합된 셀을 자동으로 해석하여 소유자 등 병합 컬럼 값을 채운다.
+
     Returns:
-        [{row, address, year, share, share_raw, original_row, split_from}, ...]
+        [{row, address, year, share, share_raw, owner, original_row, split_from}, ...]
         split_from 이 있으면 원본 셀에 복수 주소가 있었음을 의미.
     """
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes))
     ws = wb.active
+    all_rows = _resolve_merged_cells(ws)
 
     results = []
-    for idx, row in enumerate(ws.iter_rows(values_only=True)):
+    for idx, vals in enumerate(all_rows):
         if idx == 0:
             continue  # 헤더행 스킵
 
-        vals = list(row)
         if address_col >= len(vals) or not vals[address_col]:
             continue
 
@@ -331,6 +365,11 @@ def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
         if share_col is not None and share_col < len(vals) and vals[share_col]:
             share_raw = str(vals[share_col]).strip()
             share_ratio = parse_share(share_raw)
+
+        # 소유자
+        owner = ""
+        if owner_col is not None and owner_col < len(vals) and vals[owner_col]:
+            owner = str(vals[owner_col]).strip()
 
         addresses = split_addresses(raw_addr)
         for addr in addresses:
@@ -358,6 +397,7 @@ def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
                 "share": final_share,
                 "share_raw": final_share_raw,
                 "share_display": format_share(final_share),
+                "owner": owner,
                 "original_row": idx + 1,
                 "split_from": raw_addr if len(addresses) > 1 else None,
             })
@@ -386,7 +426,12 @@ def generate_cleaned_excel(addresses: list[dict]) -> bytes:
     )
 
     has_share = any(a.get("share") is not None for a in addresses)
-    headers = ["#", "주소", "기준년도"]
+    has_owner = any(a.get("owner") for a in addresses)
+
+    headers = ["#"]
+    if has_owner:
+        headers.append("소유자")
+    headers += ["주소", "기준년도"]
     if has_share:
         headers.append("지분")
     headers.append("원본행번호")
@@ -398,9 +443,16 @@ def generate_cleaned_excel(addresses: list[dict]) -> bytes:
         cell.alignment = header_align
         cell.border = thin_border
 
-    for row_idx, entry in enumerate(addresses, 2):
-        values = [
-            row_idx - 1,
+    # 소유자별 정렬 (소유자가 있으면)
+    sorted_addrs = addresses
+    if has_owner:
+        sorted_addrs = sorted(addresses, key=lambda a: (a.get("owner", ""), a.get("original_row", 0)))
+
+    for row_idx, entry in enumerate(sorted_addrs, 2):
+        values = [row_idx - 1]
+        if has_owner:
+            values.append(entry.get("owner", ""))
+        values += [
             entry["address"],
             entry["year"],
         ]
@@ -412,14 +464,19 @@ def generate_cleaned_excel(addresses: list[dict]) -> bytes:
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
             cell.border = thin_border
 
-    ws.column_dimensions["A"].width = 5
-    ws.column_dimensions["B"].width = 40
-    ws.column_dimensions["C"].width = 12
-    if has_share:
-        ws.column_dimensions["D"].width = 12
-        ws.column_dimensions["E"].width = 12
-    else:
-        ws.column_dimensions["D"].width = 12
+    # 열 너비
+    for i, h in enumerate(headers, 1):
+        col_letter = openpyxl.utils.get_column_letter(i)
+        if h == "#":
+            ws.column_dimensions[col_letter].width = 5
+        elif h == "소유자":
+            ws.column_dimensions[col_letter].width = 15
+        elif h == "주소":
+            ws.column_dimensions[col_letter].width = 40
+        elif h in ("기준년도", "지분"):
+            ws.column_dimensions[col_letter].width = 12
+        else:
+            ws.column_dimensions[col_letter].width = 12
 
     ws.auto_filter.ref = ws.dimensions
 
@@ -449,6 +506,7 @@ def start_batch_job_from_parsed(
             "year": a["year"] or default_year,
             "share": a.get("share"),
             "share_display": a.get("share_display", ""),
+            "owner": a.get("owner", ""),
         }
         for a in parsed_addresses
     ]
@@ -550,9 +608,11 @@ def _process_batch(
 
         share = entry.get("share")
         share_display = entry.get("share_display", "")
+        owner = entry.get("owner", "")
 
         result_row = {
             "row_num": entry["row"],
+            "owner": owner,
             "address": addr_str,
             "pnu": "",
             "year": year,
@@ -690,10 +750,18 @@ def _generate_output_excel(results: list[dict]) -> bytes:
     )
     price_font = Font(bold=True, color="2563EB")
 
-    # 지분 데이터가 있는지 확인
+    # 지분/소유자 데이터가 있는지 확인
     has_share = any(r.get("share") is not None for r in results)
+    has_owner = any(r.get("owner") for r in results)
 
-    headers = ["#", "주소", "PNU", "기준년도"]
+    # 소유자가 있으면 소유자별 정렬
+    if has_owner:
+        results = sorted(results, key=lambda r: (r.get("owner", ""), r.get("row_num", 0)))
+
+    headers = ["#"]
+    if has_owner:
+        headers.append("소유자")
+    headers += ["주소", "PNU", "기준년도"]
     if has_share:
         headers.append("지분")
     headers += [
@@ -724,8 +792,10 @@ def _generate_output_excel(results: list[dict]) -> bytes:
     share_font = Font(bold=True, color="D97706")
 
     for row_idx, row_data in enumerate(results, 2):
-        values = [
-            row_idx - 1,
+        values = [row_idx - 1]
+        if has_owner:
+            values.append(row_data.get("owner", ""))
+        values += [
             row_data.get("address", ""),
             row_data.get("pnu", ""),
             row_data.get("year", ""),
@@ -779,6 +849,8 @@ def _generate_output_excel(results: list[dict]) -> bytes:
             ws.column_dimensions[col_letter].width = 35
         elif h == "PNU":
             ws.column_dimensions[col_letter].width = 22
+        elif h == "소유자":
+            ws.column_dimensions[col_letter].width = 15
         elif h in ("기준년도", "지분"):
             ws.column_dimensions[col_letter].width = 10
         elif "건물명" in h:
