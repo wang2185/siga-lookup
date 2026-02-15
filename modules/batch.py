@@ -17,7 +17,6 @@ from .address import search_vworld, extract_address_components, parse_address
 _jobs: dict = {}
 _jobs_lock = threading.Lock()
 
-MAX_ROWS = 100
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 MAX_JOBS_KEPT = 20
 
@@ -166,9 +165,6 @@ def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
 
     wb.close()
 
-    if len(results) > MAX_ROWS:
-        raise ValueError(f"최대 {MAX_ROWS}건까지 처리 가능합니다. (분리 후: {len(results)}건)")
-
     return results
 
 
@@ -279,8 +275,6 @@ def parse_excel(file_bytes: bytes) -> list[dict]:
             year = str(row[1]).strip()
         rows.append({"row": idx, "address": address, "year": year})
     wb.close()
-    if len(rows) > MAX_ROWS:
-        raise ValueError(f"최대 {MAX_ROWS}건까지 처리 가능합니다. (입력: {len(rows)}건)")
     return rows
 
 
