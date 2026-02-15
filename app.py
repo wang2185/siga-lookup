@@ -20,8 +20,7 @@ from modules.commercial import CommercialPriceModule
 from modules.cache import LookupCache
 from modules.pdf import generate_pdf_response
 from modules.batch import (
-    start_batch_job, get_job, parse_excel,
-    generate_sample_template, MAX_FILE_SIZE,
+    get_job, generate_sample_template, MAX_FILE_SIZE,
     preview_excel, store_upload, get_upload,
     parse_addresses_from_excel, generate_cleaned_excel,
     start_batch_job_from_parsed, _save_parsed,
