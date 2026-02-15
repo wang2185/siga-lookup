@@ -1,7 +1,10 @@
 """Excel 일괄 조회 처리 엔진."""
 
 import io
+import json
+import os
 import re
+import tempfile
 import threading
 import time
 import uuid
@@ -20,11 +23,11 @@ _jobs_lock = threading.Lock()
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_JOBS_KEPT = 20
 
-# ─── 업로드 캐시 ───
+# ─── 업로드 캐시 (파일 기반, 멀티 워커 호환) ───
 
-MAX_UPLOADS_KEPT = 10
-_uploads: dict = {}
-_uploads_lock = threading.Lock()
+MAX_UPLOADS_KEPT = 20
+_UPLOAD_CACHE_DIR = os.path.join(tempfile.gettempdir(), "siga_upload_cache")
+os.makedirs(_UPLOAD_CACHE_DIR, exist_ok=True)
 
 _ADDR_SPLIT_RE = re.compile(r'[\n;]+')
 _SHARE_FRAC_RE = re.compile(r'(\d+)\s*/\s*(\d+)')  # 1/2, 3/10
@@ -146,7 +149,12 @@ def extract_share_from_address(addr: str) -> tuple[str, float | None, str]:
     return addr, None, ""
 
 
-# ─── 업로드 캐시 관리 ───
+# ─── 업로드 캐시 관리 (파일 기반) ───
+
+def _upload_dir(upload_id: str) -> str:
+    """업로드 ID에 해당하는 디렉토리 경로를 반환한다."""
+    return os.path.join(_UPLOAD_CACHE_DIR, upload_id)
+
 
 def store_upload(upload_id: str, file_bytes: bytes, headers: list[str],
                  row_count: int, preview: list[list]) -> UploadCache:
@@ -157,19 +165,104 @@ def store_upload(upload_id: str, file_bytes: bytes, headers: list[str],
         row_count=row_count,
         preview=preview,
     )
-    with _uploads_lock:
-        _uploads[upload_id] = cache
-        if len(_uploads) > MAX_UPLOADS_KEPT:
-            sorted_uploads = sorted(_uploads.values(), key=lambda u: u.created_at)
-            for old in sorted_uploads[: len(_uploads) - MAX_UPLOADS_KEPT]:
-                if old.upload_id != upload_id:
-                    del _uploads[old.upload_id]
+    # 파일 기반 저장
+    upload_dir = _upload_dir(upload_id)
+    os.makedirs(upload_dir, exist_ok=True)
+
+    # 엑셀 원본 바이트
+    with open(os.path.join(upload_dir, "file.xlsx"), "wb") as f:
+        f.write(file_bytes)
+
+    # 메타데이터 (headers, row_count, preview, created_at)
+    meta = {
+        "upload_id": upload_id,
+        "headers": headers,
+        "row_count": row_count,
+        "preview": preview,
+        "default_year": "",
+        "created_at": cache.created_at,
+    }
+    with open(os.path.join(upload_dir, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False)
+
+    # 오래된 업로드 정리
+    _cleanup_uploads(upload_id)
+
     return cache
 
 
+def _save_parsed(upload_id: str, parsed: list[dict], default_year: str):
+    """파싱된 주소 리스트를 파일에 저장한다."""
+    upload_dir = _upload_dir(upload_id)
+    if not os.path.isdir(upload_dir):
+        return
+
+    data = {"parsed_addresses": parsed, "default_year": default_year}
+    with open(os.path.join(upload_dir, "parsed.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
 def get_upload(upload_id: str) -> UploadCache | None:
-    with _uploads_lock:
-        return _uploads.get(upload_id)
+    """파일 기반 캐시에서 업로드 데이터를 로드한다."""
+    if not upload_id:
+        return None
+    upload_dir = _upload_dir(upload_id)
+    meta_path = os.path.join(upload_dir, "meta.json")
+    file_path = os.path.join(upload_dir, "file.xlsx")
+
+    if not os.path.isfile(meta_path) or not os.path.isfile(file_path):
+        return None
+
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    cache = UploadCache(
+        upload_id=upload_id,
+        file_bytes=file_bytes,
+        headers=meta.get("headers", []),
+        row_count=meta.get("row_count", 0),
+        preview=meta.get("preview", []),
+        default_year=meta.get("default_year", ""),
+        created_at=meta.get("created_at", 0),
+    )
+
+    # 파싱 결과가 있으면 로드
+    parsed_path = os.path.join(upload_dir, "parsed.json")
+    if os.path.isfile(parsed_path):
+        try:
+            with open(parsed_path, "r", encoding="utf-8") as f:
+                parsed_data = json.load(f)
+            cache.parsed_addresses = parsed_data.get("parsed_addresses")
+            cache.default_year = parsed_data.get("default_year", cache.default_year)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return cache
+
+
+def _cleanup_uploads(keep_id: str = ""):
+    """오래된 업로드 디렉토리를 정리한다."""
+    import shutil
+    try:
+        entries = []
+        for name in os.listdir(_UPLOAD_CACHE_DIR):
+            d = os.path.join(_UPLOAD_CACHE_DIR, name)
+            if os.path.isdir(d):
+                entries.append((d, os.path.getmtime(d)))
+        if len(entries) <= MAX_UPLOADS_KEPT:
+            return
+        entries.sort(key=lambda x: x[1])
+        for d, _ in entries[: len(entries) - MAX_UPLOADS_KEPT]:
+            if keep_id and os.path.basename(d) == keep_id:
+                continue
+            shutil.rmtree(d, ignore_errors=True)
+    except OSError:
+        pass
 
 
 # ─── 엑셀 미리보기 ───

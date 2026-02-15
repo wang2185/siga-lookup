@@ -24,7 +24,7 @@ from modules.batch import (
     generate_sample_template, MAX_FILE_SIZE,
     preview_excel, store_upload, get_upload,
     parse_addresses_from_excel, generate_cleaned_excel,
-    start_batch_job_from_parsed,
+    start_batch_job_from_parsed, _save_parsed,
 )
 
 app = Flask(__name__)
@@ -476,6 +476,7 @@ def batch_parse():
         )
         cache.parsed_addresses = parsed
         cache.default_year = default_year
+        _save_parsed(upload_id, parsed, default_year)
 
         split_count = sum(1 for a in parsed if a.get("split_from"))
         original_count = len(set(a["original_row"] for a in parsed))
