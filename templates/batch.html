@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}엑셀 일괄 조회{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="result-header">
+    <h1>엑셀 일괄 조회</h1>
+    <p style="color:var(--text-secondary);margin-top:4px;">여러 주소를 한번에 조회하여 결과를 엑셀로 다운로드</p>
+  </div>
+
+  <!-- 안내 박스 -->
+  <div class="alert alert-info">
+    <strong>사용 방법</strong>
+    <ul style="margin:8px 0 0 18px;line-height:1.8;">
+      <li>엑셀 A열에 주소, B열에 기준년도(선택)를 입력합니다.</li>
+      <li>각 주소마다 <strong>토지, 공동주택, 개별주택</strong> 3개 유형을 자동 검색합니다.</li>
+      <li>토지는 단가(원/m&sup2;) + 면적 + 총액, 주택은 공시가격을 표시합니다.</li>
+      <li>최대 100건, 파일 크기 5MB 이하</li>
+    </ul>
+  </div>
+
+  <!-- 양식 다운로드 -->
+  <div style="margin-bottom:20px;">
+    <a href="/batch/template" class="btn btn-secondary" style="display:inline-flex;align-items:center;gap:6px;">
+      샘플 양식 다운로드
+    </a>
+  </div>
+
+  <!-- 업로드 폼 -->
+  <form id="batchForm" enctype="multipart/form-data">
+    <div class="form-group">
+      <label class="form-label" for="year">기본 기준년도 (엑셀에 없을 때 적용)</label>
+      <select name="year" id="year" class="form-select" style="max-width:200px;">
+        <option value="">전체</option>
+        {% for y in years %}
+        <option value="{{ y }}" {% if y == 2025 %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="batch-upload-area" id="dropZone">
+      <div class="batch-upload-icon">&#128195;</div>
+      <p class="batch-upload-text">엑셀 파일을 드래그하거나 클릭하여 선택</p>
+      <p class="batch-upload-hint">.xlsx 파일만 지원</p>
+      <input type="file" name="file" id="fileInput" accept=".xlsx,.xls" style="display:none;">
+    </div>
+
+    <div id="fileName" class="batch-file-name" style="display:none;"></div>
+
+    <button type="submit" id="submitBtn" class="btn" style="width:100%;margin-top:16px;" disabled>
+      일괄 조회 시작
+    </button>
+  </form>
+
+  <!-- 진행 상황 -->
+  <div id="progressSection" style="display:none;margin-top:24px;">
+    <div class="batch-progress-header">
+      <span id="progressText">처리 중...</span>
+      <span id="progressCount">0 / 0</span>
+    </div>
+    <div class="batch-progress-bar">
+      <div class="batch-progress-fill" id="progressFill" style="width:0%"></div>
+    </div>
+    <p id="currentAddress" class="batch-current-address"></p>
+  </div>
+
+  <!-- 완료 -->
+  <div id="completeSection" style="display:none;margin-top:24px;">
+    <div class="alert alert-success">
+      <strong>조회 완료!</strong> 아래 버튼을 클릭하여 결과를 다운로드하세요.
+    </div>
+    <a id="downloadLink" href="#" class="btn btn-download" style="width:100%;text-align:center;">
+      결과 엑셀 다운로드
+    </a>
+  </div>
+
+  <!-- 에러 -->
+  <div id="errorSection" style="display:none;margin-top:24px;">
+    <div class="alert alert-error" id="errorMessage"></div>
+  </div>
+
+  <div class="btn-group" style="margin-top:24px;">
+    <a href="/" class="btn btn-secondary">메인으로</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/batch.js') }}"></script>
+{% endblock %}

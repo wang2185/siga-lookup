@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}통합 조회 결과{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="result-header">
+    <h1>통합 조회 결과</h1>
+  </div>
+
+  <div class="result-info">
+    <dl>
+      <dt>조회 주소</dt>
+      <dd>{{ address }}</dd>
+      <dt>기준년도</dt>
+      <dd>{{ year or '전체' }}</dd>
+    </dl>
+  </div>
+
+  {% if not auto_results %}
+  <div class="no-results">조회 결과가 없습니다.</div>
+  {% else %}
+
+  {# 토지 개별공시지가 #}
+  {% if auto_results.land %}
+  <div style="margin-top:24px;">
+    <h2 style="font-size:1.1rem;margin-bottom:10px;color:var(--primary);">{{ auto_results.land.label }}</h2>
+    <p style="margin-bottom:8px;font-weight:600;font-size:0.9rem;">{{ auto_results.land.result.results|length }}건</p>
+    <div style="overflow-x:auto;">
+      <table class="result-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>기준년도</th>
+            <th>소재지</th>
+            <th>지번</th>
+            <th>공시지가 (원/m²)</th>
+            <th>면적 (m²)</th>
+            <th>총액 (원)</th>
+            <th>공시일자</th>
+            <th>지번구분</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in auto_results.land.result.results %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ row.get('year', '') }}</td>
+            <td>{{ row.get('location', '-') }}</td>
+            <td>{{ row.get('lot_number', '-') }}</td>
+            <td class="price">{{ '{:,}'.format(row.get('price_per_sqm', 0)|int) if row.get('price_per_sqm') else '-' }}</td>
+            <td>{{ row.get('land_area', '-') }}</td>
+            <td class="price">{{ '{:,}'.format(row.get('total_price', 0)|int) if row.get('total_price') else '-' }}</td>
+            <td>{{ row.get('announcement_date', '-') }}</td>
+            <td>{{ row.get('lot_type', '-') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {# 공동주택 공시가격 #}
+  {% if auto_results.apartment %}
+  <div style="margin-top:24px;">
+    <h2 style="font-size:1.1rem;margin-bottom:10px;color:var(--primary);">{{ auto_results.apartment.label }}</h2>
+    <p style="margin-bottom:8px;font-weight:600;font-size:0.9rem;">{{ auto_results.apartment.result.results|length }}건</p>
+    <div style="overflow-x:auto;">
+      <table class="result-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>기준년도</th>
+            <th>건물명</th>
+            <th>주택유형</th>
+            <th>동</th>
+            <th>호</th>
+            <th>층</th>
+            <th>전용면적 (m2)</th>
+            <th>공시가격 (원)</th>
+            <th>소재지</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in auto_results.apartment.result.results %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ row.get('year', '') }}</td>
+            <td>{{ row.get('building_name', '-') }}</td>
+            <td>{{ row.get('building_type', '-') }}</td>
+            <td>{{ row.get('dong', '-') }}</td>
+            <td>{{ row.get('ho', '-') }}</td>
+            <td>{{ row.get('floor', '-') }}</td>
+            <td>{{ row.get('exclusive_area', '-') }}</td>
+            <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
+            <td>{{ row.get('location', '-') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {# 개별주택 공시가격 #}
+  {% if auto_results.house %}
+  <div style="margin-top:24px;">
+    <h2 style="font-size:1.1rem;margin-bottom:10px;color:var(--primary);">{{ auto_results.house.label }}</h2>
+    <p style="margin-bottom:8px;font-weight:600;font-size:0.9rem;">{{ auto_results.house.result.results|length }}건</p>
+    <div style="overflow-x:auto;">
+      <table class="result-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>기준년도</th>
+            <th>소재지</th>
+            <th>지번</th>
+            <th>공시가격 (원)</th>
+            <th>대지면적 (m2)</th>
+            <th>건물총면적 (m2)</th>
+            <th>공시일자</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in auto_results.house.result.results %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ row.get('year', '') }}</td>
+            <td>{{ row.get('location', '-') }}</td>
+            <td>{{ row.get('lot_number', '-') }}</td>
+            <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
+            <td>{{ row.get('land_area', '-') }}</td>
+            <td>{{ row.get('building_area', '-') }}</td>
+            <td>{{ row.get('announcement_date', '-') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% endif %}
+
+  <div class="btn-group">
+    <a href="/" class="btn btn-secondary">다시 조회</a>
+  </div>
+</div>
+{% endblock %}

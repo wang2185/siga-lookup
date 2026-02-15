@@ -13,7 +13,7 @@
   <form method="POST" action="/search" id="searchForm">
     <!-- 부동산 유형 선택 -->
     <div class="form-group">
-      <label>부동산 유형</label>
+      <label>부동산 유형 <span style="font-size:0.8rem;color:#64748b;font-weight:400;">(선택하지 않으면 토지/주택 자동 조회)</span></label>
       <div class="type-grid">
         {% for key, label in property_types.items() %}
         <label class="type-card" data-type="{{ key }}">
@@ -57,16 +57,16 @@
       </select>
     </div>
 
-    <!-- 동/호 추가 필드 (건물류) -->
-    <div id="extraFields" class="extra-fields">
+    <!-- 동/호 추가 필드 (건물류 또는 자동 조회 시 공동주택 필터) -->
+    <div id="extraFields" class="extra-fields show">
       <div class="form-row">
         <div class="form-group">
-          <label for="dong_no">동</label>
-          <input type="text" name="dong_no" id="dong_no" placeholder="선택">
+          <label for="dong_no">동 <span style="font-size:0.8rem;color:#94a3b8;font-weight:400;">(선택)</span></label>
+          <input type="text" name="dong_no" id="dong_no" placeholder="예: 101">
         </div>
         <div class="form-group">
-          <label for="ho_no">호</label>
-          <input type="text" name="ho_no" id="ho_no" placeholder="선택">
+          <label for="ho_no">호 <span style="font-size:0.8rem;color:#94a3b8;font-weight:400;">(선택)</span></label>
+          <input type="text" name="ho_no" id="ho_no" placeholder="예: 301">
         </div>
       </div>
     </div>
@@ -83,5 +83,11 @@
       <span class="spinner"></span>
     </button>
   </form>
+
+  <div style="margin-top:20px;text-align:center;">
+    <a href="/batch" style="color:var(--primary);font-weight:500;text-decoration:none;font-size:0.95rem;">
+      &#128195; 엑셀 일괄 조회 (여러 주소 한번에 조회)
+    </a>
+  </div>
 </div>
 {% endblock %}

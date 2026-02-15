@@ -36,7 +36,9 @@
           <th>기준년도</th>
           <th>소재지</th>
           <th>지번</th>
-          <th>공시지가 (원/m2)</th>
+          <th>공시지가 (원/m²)</th>
+          <th>면적 (m²)</th>
+          <th>총액 (원)</th>
           <th>공시일자</th>
           <th>지번구분</th>
         </tr>
@@ -49,6 +51,8 @@
           <td>{{ row.get('location', '-') }}</td>
           <td>{{ row.get('lot_number', '-') }}</td>
           <td class="price">{{ '{:,}'.format(row.get('price_per_sqm', 0)|int) if row.get('price_per_sqm') else '-' }}</td>
+          <td>{{ row.get('land_area', '-') }}</td>
+          <td class="price">{{ '{:,}'.format(row.get('total_price', 0)|int) if row.get('total_price') else '-' }}</td>
           <td>{{ row.get('announcement_date', '-') }}</td>
           <td>{{ row.get('lot_type', '-') }}</td>
         </tr>

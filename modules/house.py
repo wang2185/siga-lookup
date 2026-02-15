@@ -61,18 +61,29 @@ class HousePriceModule(BaseLookupModule):
             resp = requests.get(API_URL, params=params, timeout=15)
             data = resp.json()
 
-            items = (data.get("indvdHousingPrices", {})
-                        .get("field", []))
+            # V-World NED API 응답 구조 호환 처리
+            container = data.get("indvdHousingPrices", {})
+            if not container and "response" in data:
+                container_fields = data["response"].get("fields", {})
+                container = {"field": container_fields.get("indvdHousingPrices", [])}
+            items = container.get("field", [])
             if not isinstance(items, list):
                 items = [items] if items else []
 
             results = []
             for item in items:
+                # V-World NED 실제 필드명 우선, data.go.kr 호환 필드명 폴백
+                price = (item.get("housePc", "")
+                         or item.get("pblntfPc", ""))
+                land_area = (item.get("calcPlotAr", "")
+                             or item.get("ldAr", ""))
+                building_area = (item.get("buldCalcTotAr", "")
+                                 or item.get("bldgAr", ""))
                 results.append({
                     "year": item.get("stdrYear", ""),
-                    "price": item.get("housePc", ""),
-                    "land_area": item.get("calcPlotAr", ""),
-                    "building_area": item.get("buldCalcTotAr", ""),
+                    "price": price,
+                    "land_area": land_area,
+                    "building_area": building_area,
                     "location": item.get("ldCodeNm", ""),
                     "lot_number": item.get("mnnmSlno", ""),
                     "announcement_date": item.get("pblntfDe", ""),

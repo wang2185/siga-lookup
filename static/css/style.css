@@ -214,6 +214,86 @@ input[type="text"]:focus, select:focus {
 .extra-fields { display: none; }
 .extra-fields.show { display: block; }
 
+/* 배치 업로드 */
+.batch-upload-area {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fafbfc;
+}
+
+.batch-upload-area:hover,
+.batch-upload-area.dragover {
+  border-color: var(--primary);
+  background: #eff6ff;
+}
+
+.batch-upload-area.has-file {
+  border-color: var(--success);
+  background: #f0fdf4;
+}
+
+.batch-upload-icon { font-size: 2.5rem; margin-bottom: 8px; }
+.batch-upload-text { font-weight: 500; margin-bottom: 4px; }
+.batch-upload-hint { font-size: 0.8rem; color: var(--text-muted); }
+
+.batch-file-name {
+  margin-top: 10px;
+  padding: 8px 14px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.batch-progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.batch-progress-bar {
+  height: 12px;
+  background: #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.batch-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 6px;
+  transition: width 0.3s ease;
+}
+
+.batch-current-address {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.form-select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: white;
+}
+
+.form-label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 6px;
+  font-size: 0.9rem;
+}
+
 /* 반응형 */
 @media (max-width: 600px) {
   .container { padding: 12px; }
@@ -222,4 +302,5 @@ input[type="text"]:focus, select:focus {
   .form-row { flex-direction: column; gap: 0; }
   h1 { font-size: 1.4rem; }
   .btn-group { flex-direction: column; }
+  .batch-upload-area { padding: 24px 16px; }
 }

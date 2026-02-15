@@ -3,6 +3,8 @@
 import re
 import requests
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
 
 SIDO_MAP = {
     "서울": "서울", "부산": "부산", "대구": "대구", "인천": "인천",
@@ -108,10 +110,13 @@ def search_vworld(keyword: str, api_key: str, page: int = 1, count: int = 10) ->
         converted = []
         for item in items:
             addr = item.get("address", {})
-            title = item.get("title", "")
+            # V-World title에 <b> 태그가 포함될 수 있으므로 제거
+            title = _HTML_TAG_RE.sub("", item.get("title", ""))
+            road = addr.get("road") or title
+            parcel = addr.get("parcel") or title
             converted.append({
-                "roadAddr": addr.get("road", title),
-                "jibunAddr": addr.get("parcel", title),
+                "roadAddr": _HTML_TAG_RE.sub("", road),
+                "jibunAddr": _HTML_TAG_RE.sub("", parcel),
                 "bdMgtSn": item.get("id", ""),
                 "admCd": "",
                 "lnbrMnnm": "",
@@ -168,14 +173,22 @@ def extract_address_components(juso_item: dict) -> dict:
     sigungu = juso_item.get("sggNm", "")
     dong = juso_item.get("emdNm", "")
 
-    # siNm/sggNm/emdNm이 없으면 jibunAddr에서 파싱 시도
-    if not sido:
-        jibun = juso_item.get("jibunAddr", "")
-        if jibun:
-            parsed = parse_address(jibun)
-            sido = sido or parsed.get("sido", "")
-            sigungu = sigungu or parsed.get("sigungu", "")
-            dong = dong or parsed.get("dong", "")
+    # siNm/sggNm/emdNm이 없으면 jibunAddr → roadAddr 순으로 파싱 시도
+    bonji = juso_item.get("lnbrMnnm", "")
+    bunji = juso_item.get("lnbrSlno", "")
+    parsed = {}
+    if not sido or not bonji:
+        for addr_field in ("jibunAddr", "roadAddr"):
+            addr_text = juso_item.get(addr_field, "")
+            if addr_text:
+                parsed = parse_address(addr_text)
+                sido = sido or parsed.get("sido", "")
+                sigungu = sigungu or parsed.get("sigungu", "")
+                dong = dong or parsed.get("dong", "")
+                bonji = bonji or parsed.get("bonji", "")
+                bunji = bunji or parsed.get("bunji", "")
+            if sido and bonji:
+                break
 
     return {
         "road_addr": juso_item.get("roadAddr", ""),
@@ -183,8 +196,8 @@ def extract_address_components(juso_item: dict) -> dict:
         "sido": sido,
         "sigungu": sigungu,
         "dong": dong,
-        "bonji": juso_item.get("lnbrMnnm", ""),
-        "bunji": juso_item.get("lnbrSlno", ""),
+        "bonji": bonji,
+        "bunji": bunji,
         "bldg_name": juso_item.get("bdNm", ""),
         "pnu": extract_pnu(bd_mgt_sn),
         "adm_cd": adm_cd,

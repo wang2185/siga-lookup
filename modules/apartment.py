@@ -55,14 +55,18 @@ class ApartmentPriceModule(BaseLookupModule):
                 "pnu": search_pnu,
                 "stdrYear": stdr_year,
                 "format": "json",
-                "numOfRows": 100,
+                "numOfRows": 1000,
                 "pageNo": 1,
             }
             resp = requests.get(API_URL, params=params, timeout=15)
             data = resp.json()
 
-            items = (data.get("apartHousingPrices", {})
-                        .get("field", []))
+            # V-World NED API 응답 구조 호환 처리
+            container = data.get("apartHousingPrices", {})
+            if not container and "response" in data:
+                container_fields = data["response"].get("fields", {})
+                container = {"field": container_fields.get("apartHousingPrices", [])}
+            items = container.get("field", [])
             if not isinstance(items, list):
                 items = [items] if items else []
 
@@ -70,7 +74,7 @@ class ApartmentPriceModule(BaseLookupModule):
             for item in items:
                 results.append({
                     "year": item.get("stdrYear", ""),
-                    "building_name": item.get("aphusNm", ""),
+                    "building_name": item.get("aphusNm", "") or item.get("complexNm", ""),
                     "building_type": item.get("aphusSeCodeNm", ""),
                     "dong": item.get("dongNm", ""),
                     "ho": item.get("hoNm", ""),

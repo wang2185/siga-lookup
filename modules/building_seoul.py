@@ -84,6 +84,36 @@ class SeoulETaxModule(BaseLookupModule):
         dong = kwargs.get("dong_no", address.get("dong_no", ""))
         hosu = kwargs.get("ho_no", address.get("ho_no", ""))
 
+        # 메인 폼에서 sigu_code가 없으면 주소 정보로 자동 추출
+        if not sigu_code:
+            sigungu = address.get("sigungu", "")
+            for name, code in ETAX_SIGU.items():
+                if sigungu and (sigungu in name or name in sigungu):
+                    sigu_code = code
+                    break
+
+        if not hdong_code and sigu_code:
+            dong_name = address.get("dong", "")
+            if dong_name:
+                dong_cache = get_dong_cache()
+                dongs = dong_cache.get(sigu_code, {})
+                for code, name in dongs.items():
+                    if dong_name in name or name.replace("동", "") == dong_name:
+                        hdong_code = code
+                        break
+
+        if not sigu_code or not bonbun:
+            return LookupResult(
+                success=False,
+                property_type=self.property_type,
+                property_type_label=self.property_type_label,
+                address=address.get("_raw", ""),
+                year=year or "전체",
+                results=[],
+                source=self.source_name,
+                error="자치구 또는 본번을 추출할 수 없습니다. ETAX 전용 페이지에서 직접 조회해주세요.",
+            )
+
         try:
             results = etax_search(
                 sigu_code, hdong_code, bonbun, bubun, tsj_gubun, year, dong, hosu

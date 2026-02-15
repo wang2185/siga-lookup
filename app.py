@@ -3,7 +3,7 @@
 Flask + 모듈별 조회 (WeTax/ETAX/data.go.kr/HomeTax)
 """
 
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, send_file
 
 from config import Config
 from modules.base import PROPERTY_TYPES, LookupResult
@@ -19,6 +19,10 @@ from modules.house import HousePriceModule
 from modules.commercial import CommercialPriceModule
 from modules.cache import LookupCache
 from modules.pdf import generate_pdf_response
+from modules.batch import (
+    start_batch_job, get_job, parse_excel,
+    generate_sample_template, MAX_FILE_SIZE,
+)
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -101,10 +105,43 @@ def search():
             property_types=PROPERTY_TYPES, years=list(range(2026, 2010, -1)),
         )
 
+    # 유형 미선택 → 자동 통합 조회 (토지/공동주택/개별주택)
     if property_type not in PROPERTY_TYPES:
+        address = _resolve_address(request.form)
+        dong_no = request.form.get("dong_no", "").strip()
+        ho_no = request.form.get("ho_no", "").strip()
+        auto_results = {}
+
+        for type_key, module, label in [
+            ("land", land_module, "토지 개별공시지가"),
+            ("apartment", apartment_module, "공동주택 공시가격"),
+            ("house", house_module, "개별주택 공시가격"),
+        ]:
+            try:
+                result = module.search(address, year)
+                if result.success and result.results:
+                    # 공동주택: 동/호 필터링 (정확 일치)
+                    if type_key == "apartment" and (dong_no or ho_no):
+                        filtered = result.results
+                        if dong_no:
+                            filtered = [r for r in filtered if str(r.get("dong", "")).strip() == dong_no]
+                        if ho_no:
+                            filtered = [r for r in filtered if str(r.get("ho", "")).strip() == ho_no]
+                        result.results = filtered
+                        if not filtered:
+                            continue
+                    auto_results[type_key] = {
+                        "label": label,
+                        "result": result,
+                    }
+            except Exception:
+                pass
+
         return render_template(
-            "index.html", error="부동산 유형을 선택해주세요.",
-            property_types=PROPERTY_TYPES, years=list(range(2026, 2010, -1)),
+            "results/auto.html",
+            auto_results=auto_results,
+            address=address.get("_raw", ""),
+            year=year,
         )
 
     address = _resolve_address(request.form)
@@ -180,8 +217,8 @@ def api_address_search():
         return jsonify({"items": []})
     # V-World API 우선, 실패 시 Juso.go.kr 폴백
     result = search_vworld(keyword, Config.VWORLD_API_KEY)
-    if not result.get("items"):
-        result = search_juso(keyword, Config.VWORLD_API_KEY)
+    if not result.get("items") and Config.JUSO_API_KEY:
+        result = search_juso(keyword, Config.JUSO_API_KEY)
     return jsonify(result)
 
 
@@ -240,6 +277,88 @@ def etax_search_route():
         "year": year or "전체", "dong": dong, "hosu": hosu,
     }
     return render_template("etax_result.html", results=result.results, query=query)
+
+
+# ─── 배치 (엑셀 일괄 조회) ───
+
+@app.route("/batch")
+def batch_index():
+    return render_template(
+        "batch.html",
+        years=list(range(2026, 2010, -1)),
+    )
+
+
+@app.route("/batch/upload", methods=["POST"])
+def batch_upload():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "파일을 선택해주세요."}), 400
+
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        return jsonify({"error": "xlsx 파일만 지원합니다."}), 400
+
+    file_bytes = file.read()
+    if len(file_bytes) > MAX_FILE_SIZE:
+        return jsonify({"error": f"파일 크기가 {MAX_FILE_SIZE // (1024*1024)}MB를 초과합니다."}), 400
+
+    default_year = request.form.get("year", "").strip()
+
+    try:
+        job_id = start_batch_job(
+            file_bytes=file_bytes,
+            default_year=default_year,
+            vworld_api_key=Config.VWORLD_API_KEY,
+            land_module=land_module,
+            apartment_module=apartment_module,
+            house_module=house_module,
+        )
+        return jsonify({"job_id": job_id})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"처리 오류: {e}"}), 500
+
+
+@app.route("/batch/status/<job_id>")
+def batch_status(job_id):
+    job = get_job(job_id)
+    if not job:
+        return jsonify({"error": "작업을 찾을 수 없습니다."}), 404
+    return jsonify({
+        "status": job.status,
+        "total": job.total,
+        "processed": job.processed,
+        "current_address": job.current_address,
+        "error": job.error,
+    })
+
+
+@app.route("/batch/download/<job_id>")
+def batch_download(job_id):
+    import io
+    job = get_job(job_id)
+    if not job or job.status != "completed" or not job.output_bytes:
+        return "결과를 찾을 수 없습니다.", 404
+
+    return send_file(
+        io.BytesIO(job.output_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"일괄조회결과_{job_id}.xlsx",
+    )
+
+
+@app.route("/batch/template")
+def batch_template():
+    import io
+    template_bytes = generate_sample_template()
+    return send_file(
+        io.BytesIO(template_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="일괄조회_양식.xlsx",
+    )
 
 
 # ─── 유틸리티 ───

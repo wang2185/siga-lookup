@@ -3,9 +3,22 @@
   // 부동산 유형 선택
   document.querySelectorAll('.type-card').forEach(card => {
     card.addEventListener('click', function() {
+      const radio = this.querySelector('input[type="radio"]');
+      const wasSelected = this.classList.contains('selected');
+
+      // 이미 선택된 카드를 다시 클릭하면 선택 해제
+      if (wasSelected) {
+        this.classList.remove('selected');
+        if (radio) radio.checked = false;
+        const extraFields = document.getElementById('extraFields');
+        const etaxFields = document.getElementById('etaxFields');
+        if (extraFields) extraFields.className = 'extra-fields show';
+        if (etaxFields) etaxFields.className = 'extra-fields';
+        return;
+      }
+
       document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
       this.classList.add('selected');
-      const radio = this.querySelector('input[type="radio"]');
       if (radio) radio.checked = true;
 
       // 건물류일 때 동/호 필드 표시

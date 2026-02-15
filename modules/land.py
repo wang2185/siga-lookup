@@ -63,17 +63,31 @@ class LandPriceModule(BaseLookupModule):
             resp = requests.get(API_URL, params=params, timeout=15)
             data = resp.json()
 
-            items = (data.get("indvdLandPrices", {})
-                        .get("field", []))
+            # V-World NED API 응답 구조 호환 처리
+            container = data.get("indvdLandPrices", {})
+            if not container and "response" in data:
+                container_fields = data["response"].get("fields", {})
+                container = {"field": container_fields.get("indvdLandPrices", [])}
+            items = container.get("field", [])
             if not isinstance(items, list):
                 items = [items] if items else []
 
             results = []
             for item in items:
+                price_per_sqm = item.get("pblntfPclnd", "")
+                land_area = item.get("lndpclAr", "") or item.get("ldAr", "")
+                total_price = ""
+                if price_per_sqm and land_area:
+                    try:
+                        total_price = str(int(float(price_per_sqm) * float(land_area)))
+                    except (ValueError, TypeError):
+                        pass
                 results.append({
                     "pnu": item.get("pnu", ""),
                     "year": item.get("stdrYear", ""),
-                    "price_per_sqm": item.get("pblntfPclnd", ""),
+                    "price_per_sqm": price_per_sqm,
+                    "land_area": land_area,
+                    "total_price": total_price,
                     "announcement_date": item.get("pblntfDe", ""),
                     "location": item.get("ldCodeNm", ""),
                     "lot_number": item.get("mnnmSlno", ""),
