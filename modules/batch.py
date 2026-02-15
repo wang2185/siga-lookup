@@ -26,9 +26,22 @@ MAX_UPLOADS_KEPT = 10
 _uploads: dict = {}
 _uploads_lock = threading.Lock()
 
-_ADDR_SPLIT_RE = re.compile(r'[\n,;]+')
+_ADDR_SPLIT_RE = re.compile(r'[\n;]+')
 _SHARE_FRAC_RE = re.compile(r'(\d+)\s*/\s*(\d+)')  # 1/2, 3/10
 _SHARE_PCT_RE = re.compile(r'([\d.]+)\s*%')  # 50%, 33.33%
+
+# 주소 내 지분 표시 패턴 (괄호 안/밖, 키워드 유무)
+# 예: "(지분 1/2)", "(1/2)", "지분1/2", "(50%)", "(지분 50%)", "지분 50%"
+_ADDR_SHARE_PATTERNS = [
+    # 괄호 안 지분 표시: (지분 1/2), (지분1/2), (1/2), (50%), (지분 50%)
+    re.compile(r'\(\s*지분\s*(\d+\s*/\s*\d+)\s*\)'),
+    re.compile(r'\(\s*지분\s*([\d.]+\s*%)\s*\)'),
+    re.compile(r'\(\s*(\d+\s*/\s*\d+)\s*\)'),
+    re.compile(r'\(\s*([\d.]+\s*%)\s*\)'),
+    # 괄호 없이 키워드 + 값: 지분1/2, 지분 1/2, 지분50%, 지분 50%
+    re.compile(r'지분\s*(\d+\s*/\s*\d+)'),
+    re.compile(r'지분\s*([\d.]+\s*%)'),
+]
 
 
 @dataclass
@@ -109,6 +122,28 @@ def format_share(ratio: float | None) -> str:
     if pct == int(pct):
         return f"{int(pct)}%"
     return f"{pct:.2f}%"
+
+
+def extract_share_from_address(addr: str) -> tuple[str, float | None, str]:
+    """주소 문자열에서 지분 표시를 추출·제거한다.
+
+    Returns:
+        (정리된_주소, 지분_비율, 원본_지분_텍스트)
+        지분이 없으면 (원본_주소, None, "")
+    """
+    for pat in _ADDR_SHARE_PATTERNS:
+        m = pat.search(addr)
+        if m:
+            share_text = m.group(1)
+            ratio = parse_share(share_text)
+            if ratio is not None:
+                # 매치된 전체 부분을 주소에서 제거
+                clean = addr[:m.start()] + addr[m.end():]
+                clean = clean.strip()
+                # 제거 후 남은 불필요한 공백 정리
+                clean = re.sub(r'\s{2,}', ' ', clean)
+                return clean, ratio, m.group(0).strip()
+    return addr, None, ""
 
 
 # ─── 업로드 캐시 관리 ───
@@ -206,13 +241,30 @@ def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
 
         addresses = split_addresses(raw_addr)
         for addr in addresses:
+            # 주소 내 지분 표시 추출 (별도 컬럼 값이 없을 때만 사용)
+            clean_addr, embedded_share, embedded_raw = extract_share_from_address(addr)
+            if share_ratio is not None:
+                # 별도 컬럼 지분이 우선
+                final_share = share_ratio
+                final_share_raw = share_raw
+                final_addr = clean_addr if embedded_share is not None else addr
+            elif embedded_share is not None:
+                # 주소 내 지분 사용
+                final_share = embedded_share
+                final_share_raw = embedded_raw
+                final_addr = clean_addr
+            else:
+                final_share = None
+                final_share_raw = ""
+                final_addr = addr
+
             results.append({
                 "row": idx + 1,  # 엑셀 행 번호 (1-based, 헤더 포함)
-                "address": addr,
+                "address": final_addr,
                 "year": year,
-                "share": share_ratio,
-                "share_raw": share_raw,
-                "share_display": format_share(share_ratio),
+                "share": final_share,
+                "share_raw": final_share_raw,
+                "share_display": format_share(final_share),
                 "original_row": idx + 1,
                 "split_from": raw_addr if len(addresses) > 1 else None,
             })
