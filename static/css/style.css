@@ -1,0 +1,225 @@
+/* 시가 조회 포털 공통 스타일 */
+:root {
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --bg: #f0f4f8;
+  --card-bg: #ffffff;
+  --text: #1e293b;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --success: #16a34a;
+  --error: #dc2626;
+  --warning: #d97706;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Noto Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.card {
+  background: var(--card-bg);
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  padding: 32px;
+  margin-bottom: 20px;
+}
+
+h1 { font-size: 1.8rem; font-weight: 700; text-align: center; margin-bottom: 8px; }
+.subtitle { text-align: center; color: var(--text-muted); margin-bottom: 24px; font-size: 0.95rem; }
+
+/* 부동산 유형 선택 */
+.type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.type-card {
+  position: relative;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 10px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.type-card:hover { border-color: var(--primary); background: #eff6ff; }
+.type-card input[type="radio"] { display: none; }
+.type-card.selected { border-color: var(--primary); background: #dbeafe; font-weight: 600; }
+
+.type-card .type-icon { font-size: 1.5rem; display: block; margin-bottom: 6px; }
+.type-card .type-name { font-weight: 500; }
+.type-card .type-desc { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+
+/* 폼 */
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 0.9rem; }
+
+.form-row { display: flex; gap: 12px; }
+.form-row .form-group { flex: 1; }
+
+input[type="text"], select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+input[type="text"]:focus, select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+
+/* 자동완성 드롭다운 */
+.autocomplete-wrapper { position: relative; }
+.autocomplete-list {
+  position: absolute;
+  top: 100%;
+  left: 0; right: 0;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 100;
+  display: none;
+}
+.autocomplete-list.show { display: block; }
+.autocomplete-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.autocomplete-item:hover { background: #f1f5f9; }
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item .road-addr { font-weight: 500; }
+.autocomplete-item .jibun-addr { color: var(--text-muted); font-size: 0.8rem; margin-top: 2px; }
+
+/* 버튼 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+
+.btn-primary { background: var(--primary); color: white; width: 100%; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+
+.btn-secondary { background: #f1f5f9; color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { background: #e2e8f0; }
+
+.btn-download { background: var(--success); color: white; }
+.btn-download:hover { background: #15803d; }
+
+.btn-group { display: flex; gap: 10px; margin-top: 20px; }
+
+/* 결과 */
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.result-info {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.result-info dt { font-weight: 500; color: var(--text-muted); font-size: 0.8rem; }
+.result-info dd { font-weight: 600; margin-bottom: 8px; }
+
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.result-table th {
+  background: #f1f5f9;
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border-bottom: 2px solid var(--border);
+}
+
+.result-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.result-table tr:hover { background: #f8fafc; }
+
+.price { font-weight: 700; color: var(--primary); }
+.no-results { text-align: center; padding: 40px; color: var(--text-muted); }
+
+/* 에러/메시지 */
+.alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem; }
+.alert-error { background: #fef2f2; color: var(--error); border: 1px solid #fecaca; }
+.alert-success { background: #f0fdf4; color: var(--success); border: 1px solid #bbf7d0; }
+.alert-warning { background: #fffbeb; color: var(--warning); border: 1px solid #fde68a; }
+.alert-info { background: #eff6ff; color: var(--primary); border: 1px solid #bfdbfe; }
+
+/* 로딩 */
+.spinner {
+  display: none;
+  width: 20px; height: 20px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading .spinner { display: inline-block; }
+.loading .btn-text { display: none; }
+
+/* 추가 필드 (동/호) */
+.extra-fields { display: none; }
+.extra-fields.show { display: block; }
+
+/* 반응형 */
+@media (max-width: 600px) {
+  .container { padding: 12px; }
+  .card { padding: 20px; border-radius: 12px; }
+  .type-grid { grid-template-columns: repeat(2, 1fr); }
+  .form-row { flex-direction: column; gap: 0; }
+  h1 { font-size: 1.4rem; }
+  .btn-group { flex-direction: column; }
+}

@@ -1,177 +1,87 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>위택스 시가표준액 조회</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
-            background: #f0f4f8;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .container {
-            background: #fff;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            padding: 40px;
-            max-width: 600px;
-            width: 100%;
-        }
-        h1 {
-            color: #1a365d;
-            font-size: 24px;
-            margin-bottom: 8px;
-            text-align: center;
-        }
-        .subtitle {
-            color: #718096;
-            font-size: 14px;
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .form-group { margin-bottom: 20px; }
-        label {
-            display: block;
-            font-weight: 600;
-            color: #2d3748;
-            margin-bottom: 8px;
-            font-size: 14px;
-        }
-        input[type="text"] {
-            width: 100%;
-            padding: 12px 16px;
-            border: 2px solid #e2e8f0;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.2s;
-        }
-        input[type="text"]:focus {
-            outline: none;
-            border-color: #4299e1;
-        }
-        .examples {
-            color: #a0aec0;
-            font-size: 13px;
-            margin-top: 8px;
-            line-height: 1.6;
-        }
-        .btn {
-            width: 100%;
-            padding: 14px;
-            background: #3182ce;
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .btn:hover { background: #2b6cb0; }
-        .btn:disabled {
-            background: #a0aec0;
-            cursor: not-allowed;
-        }
-        .error {
-            background: #fff5f5;
-            color: #c53030;
-            padding: 12px 16px;
-            border-radius: 8px;
-            border: 1px solid #feb2b2;
-            margin-bottom: 20px;
-            font-size: 14px;
-        }
-        .parsed {
-            background: #f7fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 20px;
-            font-size: 13px;
-            color: #4a5568;
-            line-height: 1.8;
-        }
-        .spinner {
-            display: none;
-            text-align: center;
-            margin-top: 16px;
-            color: #4299e1;
-            font-size: 14px;
-        }
-        .spinner.active { display: block; }
-        .spinner::before {
-            content: '';
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #bee3f8;
-            border-top-color: #3182ce;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            vertical-align: middle;
-            margin-right: 8px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>위택스 시가표준액 조회</h1>
-        <p class="subtitle">서울 외 지역 - 위택스에서 시가표준액을 자동 조회합니다</p>
+{% extends "base.html" %}
+{% block title %}시가 조회 포털{% endblock %}
 
-        {% if error %}
-        <div class="error">{{ error }}</div>
-        {% endif %}
+{% block content %}
+<div class="card">
+  <h1>시가 조회 포털</h1>
+  <p class="subtitle">토지/주택/건물 공시가격 및 시가표준액을 한곳에서 조회합니다</p>
 
-        {% if parsed %}
-        <div class="parsed">
-            <strong>파싱 결과:</strong><br>
-            시/도: {{ parsed.sido or '(없음)' }} |
-            시/군/구: {{ parsed.sigungu or '(없음)' }} |
-            읍/면/동: {{ parsed.dong or '(없음)' }} |
-            번지: {{ parsed.bonji or '(없음)' }}{{ '-' + parsed.bunji if parsed.bunji else '' }}{{ '(산)' if parsed.san else '' }}<br>
-            건물명: {{ parsed.bldg_name or '(없음)' }} |
-            동: {{ parsed.dong_no or '(없음)' }} |
-            호: {{ parsed.ho_no or '(없음)' }}
-        </div>
-        {% endif %}
+  {% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+  {% endif %}
 
-        <div style="text-align:center;margin-bottom:24px;">
-            <a href="/etax" style="color:#3182ce;font-size:14px;text-decoration:underline;">
-                서울 지역 &rarr; 서울시 ETAX 주택외건물 시가표준액 조회
-            </a>
-        </div>
-
-        <form method="POST" action="/search" id="searchForm">
-            <div class="form-group">
-                <label for="address">주소 입력</label>
-                <input type="text" id="address" name="address"
-                       placeholder="예) 경기 하남시 망월동 1079 우성르보아파크 1142호"
-                       value="{{ address or '' }}" required>
-                <div class="examples">
-                    예) 경기 하남시 망월동 1079 우성르보아파크 1142호<br>
-                    예) 서울 강남구 역삼동 123-4 501호
-                </div>
-            </div>
-            <button type="submit" class="btn" id="submitBtn">조회하기</button>
-            <div class="spinner" id="spinner">
-                위택스에서 조회 중입니다... (약 20~30초 소요)
-            </div>
-        </form>
+  <form method="POST" action="/search" id="searchForm">
+    <!-- 부동산 유형 선택 -->
+    <div class="form-group">
+      <label>부동산 유형</label>
+      <div class="type-grid">
+        {% for key, label in property_types.items() %}
+        <label class="type-card" data-type="{{ key }}">
+          <input type="radio" name="property_type" value="{{ key }}">
+          <span class="type-icon">
+            {% if key == 'land' %}&#127966;
+            {% elif key == 'apartment' %}&#127970;
+            {% elif key == 'house' %}&#127968;
+            {% elif key == 'building' %}&#127959;
+            {% elif key == 'commercial' %}&#127978;
+            {% elif key == 'factory' %}&#127981;
+            {% endif %}
+          </span>
+          <span class="type-name">{{ label.split(' (')[0] }}</span>
+          <span class="type-desc">{{ label.split(' (')[1][:-1] if ' (' in label else '' }}</span>
+        </label>
+        {% endfor %}
+      </div>
     </div>
 
-    <script>
-        document.getElementById('searchForm').addEventListener('submit', function() {
-            document.getElementById('submitBtn').disabled = true;
-            document.getElementById('submitBtn').textContent = '조회 중...';
-            document.getElementById('spinner').classList.add('active');
-        });
-    </script>
-</body>
-</html>
+    <!-- 주소 입력 -->
+    <div class="form-group">
+      <label for="addressInput">주소 입력</label>
+      <div class="autocomplete-wrapper">
+        <input type="text" id="addressInput" name="address"
+               placeholder="주소를 입력하세요 (예: 강남구 역삼동 123-4)" autocomplete="off">
+        <div class="autocomplete-list" id="autocompleteList"></div>
+      </div>
+      <input type="hidden" id="jusoData" name="juso_data">
+      <div id="selectedAddress" style="display:none;margin-top:6px;font-size:0.85rem;color:var(--primary);font-weight:500;"></div>
+    </div>
+
+    <!-- 기준년도 -->
+    <div class="form-group">
+      <label for="year">기준년도</label>
+      <select name="year" id="year">
+        <option value="">전체</option>
+        {% for y in years %}
+        <option value="{{ y }}">{{ y }}년</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- 동/호 추가 필드 (건물류) -->
+    <div id="extraFields" class="extra-fields">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="dong_no">동</label>
+          <input type="text" name="dong_no" id="dong_no" placeholder="선택">
+        </div>
+        <div class="form-group">
+          <label for="ho_no">호</label>
+          <input type="text" name="ho_no" id="ho_no" placeholder="선택">
+        </div>
+      </div>
+    </div>
+
+    <!-- ETAX 추가 필드 (서울 주택외건물) -->
+    <div id="etaxFields" class="extra-fields">
+      <div class="alert alert-info" style="font-size:0.85rem;">
+        서울 지역 주택외건물은 <a href="/etax" style="text-decoration:underline;">ETAX 전용 페이지</a>에서 더 정확하게 조회할 수 있습니다.
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">
+      <span class="btn-text">조회하기</span>
+      <span class="spinner"></span>
+    </button>
+  </form>
+</div>
+{% endblock %}

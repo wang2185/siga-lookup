@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+      font-size: 11pt;
+      color: #1e293b;
+      line-height: 1.6;
+      padding: 20mm;
+    }
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #2563eb;
+      padding-bottom: 12px;
+      margin-bottom: 20px;
+    }
+    .header h1 { font-size: 18pt; color: #2563eb; margin-bottom: 4px; }
+    .header .date { font-size: 9pt; color: #64748b; }
+    .info-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      font-size: 10pt;
+    }
+    .info-box dt { font-weight: 600; color: #64748b; font-size: 9pt; display: inline; }
+    .info-box dd { display: inline; margin-right: 20px; font-weight: 500; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      margin-bottom: 16px;
+    }
+    th {
+      background: #f1f5f9;
+      padding: 8px 10px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 9pt;
+      color: #64748b;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .price { font-weight: 700; color: #2563eb; }
+    .footer {
+      margin-top: 30px;
+      padding-top: 12px;
+      border-top: 1px solid #e2e8f0;
+      font-size: 8pt;
+      color: #94a3b8;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>{{ result.property_type_label }} 조회 결과</h1>
+    <div class="date">조회일시: {{ now }}</div>
+  </div>
+
+  <div class="info-box">
+    <dl>
+      <dt>주소: </dt><dd>{{ result.address }}</dd>
+      <dt>기준년도: </dt><dd>{{ result.year or '전체' }}</dd>
+      <dt>출처: </dt><dd>{{ result.source }}</dd>
+    </dl>
+  </div>
+
+  {% if result.results %}
+  <p style="margin-bottom:8px;font-weight:600;font-size:10pt;">총 {{ result.results|length }}건</p>
+
+  {% if result.property_type == 'land' %}
+  <table>
+    <thead>
+      <tr><th>#</th><th>기준년도</th><th>공시지가 (원/m2)</th><th>공시일자</th><th>면적 (m2)</th><th>용도</th></tr>
+    </thead>
+    <tbody>
+      {% for row in result.results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.get('year', '') }}</td>
+        <td class="price">{{ '{:,}'.format(row.get('price_per_sqm', 0)|int) if row.get('price_per_sqm') else '-' }}</td>
+        <td>{{ row.get('announcement_date', '-') }}</td>
+        <td>{{ row.get('land_area', '-') }}</td>
+        <td>{{ row.get('land_use', '-') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% elif result.property_type == 'apartment' %}
+  <table>
+    <thead>
+      <tr><th>#</th><th>기준년도</th><th>건물명</th><th>동</th><th>호</th><th>전용면적</th><th>공시가격 (만원)</th></tr>
+    </thead>
+    <tbody>
+      {% for row in result.results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.get('year', '') }}</td>
+        <td>{{ row.get('building_name', '-') }}</td>
+        <td>{{ row.get('dong', '-') }}</td>
+        <td>{{ row.get('ho', '-') }}</td>
+        <td>{{ row.get('exclusive_area', '-') }}</td>
+        <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% elif result.property_type == 'house' %}
+  <table>
+    <thead>
+      <tr><th>#</th><th>기준년도</th><th>공시가격 (만원)</th><th>대지면적</th><th>건물총면적</th><th>공시일자</th></tr>
+    </thead>
+    <tbody>
+      {% for row in result.results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.get('year', '') }}</td>
+        <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
+        <td>{{ row.get('land_area', '-') }}</td>
+        <td>{{ row.get('building_area', '-') }}</td>
+        <td>{{ row.get('announcement_date', '-') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% else %}
+  <!-- building, commercial, factory: 범용 테이블 -->
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        {% if result.results[0] is mapping %}
+          {% for key in result.results[0] %}
+          <th>{{ key }}</th>
+          {% endfor %}
+        {% else %}
+          {% for cell in result.results[0] %}
+          <th>항목{{ loop.index }}</th>
+          {% endfor %}
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in result.results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        {% if row is mapping %}
+          {% for key, val in row.items() %}
+          <td>{{ val }}</td>
+          {% endfor %}
+        {% else %}
+          {% for cell in row %}
+          <td>{{ cell }}</td>
+          {% endfor %}
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% else %}
+  <p style="text-align:center;color:#94a3b8;padding:30px;">조회 결과가 없습니다.</p>
+  {% endif %}
+
+  <div class="footer">
+    본 자료는 참고용이며, 정확한 공시가격은 해당 기관의 공식 발표를 확인하시기 바랍니다.<br>
+    시가 조회 포털 | {{ now }}
+  </div>
+</body>
+</html>

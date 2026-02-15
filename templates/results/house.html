@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}개별주택 공시가격 조회 결과{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="result-header">
+    <h1>개별주택 공시가격</h1>
+  </div>
+
+  <div class="result-info">
+    <dl>
+      <dt>조회 주소</dt>
+      <dd>{{ result.address }}</dd>
+      <dt>기준년도</dt>
+      <dd>{{ result.year or '전체' }}</dd>
+      <dt>데이터 출처</dt>
+      <dd>{{ result.source }}{% if result.cached %} (캐시){% endif %}</dd>
+    </dl>
+  </div>
+
+  {% if result.error %}
+  <div class="alert alert-error">{{ result.error }}</div>
+  {% endif %}
+
+  {% if result.message %}
+  <div class="alert alert-info">{{ result.message }}</div>
+  {% endif %}
+
+  {% if result.results %}
+  <p style="margin-bottom:12px;font-weight:600;">총 {{ result.results|length }}건</p>
+  <div style="overflow-x:auto;">
+    <table class="result-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>기준년도</th>
+          <th>공시가격 (만원)</th>
+          <th>대지면적 (m2)</th>
+          <th>건물총면적 (m2)</th>
+          <th>공시일자</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result.results %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ row.get('year', '') }}</td>
+          <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
+          <td>{{ row.get('land_area', '-') }}</td>
+          <td>{{ row.get('building_area', '-') }}</td>
+          <td>{{ row.get('announcement_date', '-') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif not result.error %}
+  <div class="no-results">조회 결과가 없습니다.</div>
+  {% endif %}
+
+  <div class="btn-group">
+    <a href="/" class="btn btn-secondary">다시 조회</a>
+    {% if result.results %}
+    <form method="POST" action="/download/pdf" style="flex:1;">
+      <button type="submit" class="btn btn-download" style="width:100%;">PDF 다운로드</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

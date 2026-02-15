@@ -3,3 +3,6 @@ requests
 beautifulsoup4
 selenium
 urllib3
+python-dotenv
+cachetools
+weasyprint

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}공동주택 공시가격 조회 결과{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="result-header">
+    <h1>공동주택 공시가격</h1>
+  </div>
+
+  <div class="result-info">
+    <dl>
+      <dt>조회 주소</dt>
+      <dd>{{ result.address }}</dd>
+      <dt>기준년도</dt>
+      <dd>{{ result.year or '전체' }}</dd>
+      <dt>데이터 출처</dt>
+      <dd>{{ result.source }}{% if result.cached %} (캐시){% endif %}</dd>
+    </dl>
+  </div>
+
+  {% if result.error %}
+  <div class="alert alert-error">{{ result.error }}</div>
+  {% endif %}
+
+  {% if result.message %}
+  <div class="alert alert-info">{{ result.message }}</div>
+  {% endif %}
+
+  {% if result.results %}
+  <p style="margin-bottom:12px;font-weight:600;">총 {{ result.results|length }}건</p>
+  <div style="overflow-x:auto;">
+    <table class="result-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>기준년도</th>
+          <th>건물명</th>
+          <th>동</th>
+          <th>호</th>
+          <th>전용면적 (m2)</th>
+          <th>공시가격 (만원)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result.results %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ row.get('year', '') }}</td>
+          <td>{{ row.get('building_name', '-') }}</td>
+          <td>{{ row.get('dong', '-') }}</td>
+          <td>{{ row.get('ho', '-') }}</td>
+          <td>{{ row.get('exclusive_area', '-') }}</td>
+          <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif not result.error %}
+  <div class="no-results">조회 결과가 없습니다.</div>
+  {% endif %}
+
+  <div class="btn-group">
+    <a href="/" class="btn btn-secondary">다시 조회</a>
+    {% if result.results %}
+    <form method="POST" action="/download/pdf" style="flex:1;">
+      <button type="submit" class="btn btn-download" style="width:100%;">PDF 다운로드</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
