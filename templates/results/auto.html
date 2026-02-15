@@ -84,6 +84,13 @@
   </div>
   {% endif %}
 
+  {# 동/호 입력 안내 #}
+  {% if show_dong_ho_guide %}
+  <div style="margin-top:20px;padding:14px 18px;background:#e8f4fd;border:1px solid #b3d9f2;border-radius:8px;font-size:0.9rem;color:#1a5276;">
+    <strong>ℹ</strong> 공동주택 결과가 {{ apartment_count }}건입니다. 동/호수를 입력하면 정확한 결과를 확인할 수 있습니다.
+  </div>
+  {% endif %}
+
   {# 공동주택 공시가격 #}
   {% if auto_results.apartment %}
   <div style="margin-top:24px;">
@@ -208,7 +215,10 @@
     <a href="/" class="btn btn-secondary">다시 조회</a>
     {% if auto_results %}
     <form method="POST" action="/download/auto-pdf" style="flex:1;">
-      <button type="submit" class="btn btn-download" style="width:100%;">PDF 다운로드</button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" name="filename" placeholder="파일명 (선택)" class="pdf-filename-input" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:0.85rem;">
+        <button type="submit" class="btn btn-download">PDF 다운로드</button>
+      </div>
     </form>
     {% endif %}
   </div>

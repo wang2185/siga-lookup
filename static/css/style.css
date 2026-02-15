@@ -294,6 +294,27 @@ input[type="text"]:focus, select:focus {
   font-size: 0.9rem;
 }
 
+/* 배치 단계별 UI */
+.batch-step-desc { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 16px; }
+
+.batch-preview-wrapper {
+  overflow-x: auto;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.batch-address-count {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding: 8px 0;
+}
+
+.pdf-filename-input {
+  font-family: inherit;
+}
+
 /* 반응형 */
 @media (max-width: 600px) {
   .container { padding: 12px; }

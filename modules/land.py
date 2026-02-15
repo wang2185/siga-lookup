@@ -5,6 +5,7 @@ import requests
 from .base import BaseLookupModule, LookupResult
 
 API_URL = "https://api.vworld.kr/ned/data/getIndvdLandPriceAttr"
+LAND_MOVE_API_URL = "https://api.vworld.kr/ned/data/getLandMoveAttr"
 
 
 class LandPriceModule(BaseLookupModule):
@@ -23,6 +24,29 @@ class LandPriceModule(BaseLookupModule):
     @property
     def source_name(self) -> str:
         return "V-World"
+
+    def _fetch_land_area(self, pnu: str, stdr_year: str) -> str:
+        """getLandMoveAttr API로 토지 면적(lndpclAr)을 조회한다."""
+        try:
+            params = {
+                "key": self.api_key,
+                "pnu": pnu,
+                "stdrYear": stdr_year,
+                "format": "json",
+                "numOfRows": 1,
+                "pageNo": 1,
+            }
+            resp = requests.get(LAND_MOVE_API_URL, params=params, timeout=10)
+            data = resp.json()
+            container = data.get("landMoves", {})
+            items = container.get("field", [])
+            if not isinstance(items, list):
+                items = [items] if items else []
+            if items:
+                return items[0].get("lndpclAr", "")
+        except Exception:
+            pass
+        return ""
 
     def search(self, address: dict, year: str = "", **kwargs) -> LookupResult:
         if not self.api_key:
@@ -76,6 +100,14 @@ class LandPriceModule(BaseLookupModule):
             for item in items:
                 price_per_sqm = item.get("pblntfPclnd", "")
                 land_area = item.get("lndpclAr", "") or item.get("ldAr", "")
+                item_pnu = item.get("pnu", "")
+
+                # 면적이 없으면 getLandMoveAttr API로 보충 조회
+                if not land_area and item_pnu:
+                    land_area = self._fetch_land_area(
+                        item_pnu, item.get("stdrYear", stdr_year)
+                    )
+
                 total_price = ""
                 if price_per_sqm and land_area:
                     try:
@@ -83,7 +115,7 @@ class LandPriceModule(BaseLookupModule):
                     except (ValueError, TypeError):
                         pass
                 results.append({
-                    "pnu": item.get("pnu", ""),
+                    "pnu": item_pnu,
                     "year": item.get("stdrYear", ""),
                     "price_per_sqm": price_per_sqm,
                     "land_area": land_area,

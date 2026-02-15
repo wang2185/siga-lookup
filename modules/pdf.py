@@ -1,7 +1,8 @@
 """PDF 생성 모듈 — WeasyPrint."""
 
+import re
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 from flask import render_template, make_response
 
@@ -16,6 +17,9 @@ except ImportError:
 # 허용된 외부 도메인 (폰트 등)
 _ALLOWED_HOSTS = {"fonts.googleapis.com", "fonts.gstatic.com"}
 
+# 파일명에 허용되지 않는 문자 제거
+_UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
 
 def _safe_url_fetcher(url, timeout=10, ssl_context=None):
     """file:// 프로토콜 차단, 허용된 호스트만 외부 접근 허용."""
@@ -28,6 +32,16 @@ def _safe_url_fetcher(url, timeout=10, ssl_context=None):
     return default_url_fetcher(url, timeout=timeout, ssl_context=ssl_context)
 
 
+def _sanitize_filename(name: str) -> str:
+    """사용자 입력 파일명을 안전하게 정리한다."""
+    name = _UNSAFE_FILENAME_RE.sub("", name).strip()
+    if not name:
+        return ""
+    if not name.lower().endswith(".pdf"):
+        name += ".pdf"
+    return name
+
+
 def generate_pdf_response(result, filename=None):
     """조회 결과를 PDF로 변환하여 Flask Response를 반환한다."""
     from .base import SOURCE_INFO
@@ -35,11 +49,18 @@ def generate_pdf_response(result, filename=None):
     if not WEASYPRINT_AVAILABLE:
         return make_response("WeasyPrint가 설치되지 않았습니다.", 500)
 
-    from urllib.parse import quote
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if not filename:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"siga_{timestamp}.pdf"
+    if filename:
+        sanitized = _sanitize_filename(filename)
+        if sanitized:
+            display_name = sanitized
+        else:
+            display_name = f"시가조회_{timestamp}.pdf"
+    else:
+        display_name = f"시가조회_{timestamp}.pdf"
+
+    ascii_name = f"siga_{timestamp}.pdf"
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     source_info = SOURCE_INFO.get(result.property_type, {})
@@ -54,11 +75,11 @@ def generate_pdf_response(result, filename=None):
         url_fetcher=_safe_url_fetcher,
     ).write_pdf()
 
-    display_name = quote(f"시가조회_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    encoded_name = quote(display_name)
     response = make_response(pdf_bytes)
     response.headers["Content-Type"] = "application/pdf"
     response.headers["Content-Disposition"] = (
-        f"attachment; filename={filename}; filename*=UTF-8''{display_name}"
+        f"attachment; filename={ascii_name}; filename*=UTF-8''{encoded_name}"
     )
     return response
 
@@ -66,14 +87,22 @@ def generate_pdf_response(result, filename=None):
 def generate_auto_pdf_response(auto_data, filename=None):
     """통합 조회 결과를 PDF로 변환하여 Flask Response를 반환한다."""
     from .base import SOURCE_INFO
-    from urllib.parse import quote
 
     if not WEASYPRINT_AVAILABLE:
         return make_response("WeasyPrint가 설치되지 않았습니다.", 500)
 
-    if not filename:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"siga_auto_{timestamp}.pdf"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if filename:
+        sanitized = _sanitize_filename(filename)
+        if sanitized:
+            display_name = sanitized
+        else:
+            display_name = f"통합조회_{timestamp}.pdf"
+    else:
+        display_name = f"통합조회_{timestamp}.pdf"
+
+    ascii_name = f"siga_auto_{timestamp}.pdf"
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html_string = render_template(
@@ -87,10 +116,10 @@ def generate_auto_pdf_response(auto_data, filename=None):
         url_fetcher=_safe_url_fetcher,
     ).write_pdf()
 
-    display_name = quote(f"통합조회_{timestamp}.pdf")
+    encoded_name = quote(display_name)
     response = make_response(pdf_bytes)
     response.headers["Content-Type"] = "application/pdf"
     response.headers["Content-Disposition"] = (
-        f"attachment; filename={filename}; filename*=UTF-8''{display_name}"
+        f"attachment; filename={ascii_name}; filename*=UTF-8''{encoded_name}"
     )
     return response

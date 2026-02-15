@@ -22,6 +22,9 @@ from modules.pdf import generate_pdf_response
 from modules.batch import (
     start_batch_job, get_job, parse_excel,
     generate_sample_template, MAX_FILE_SIZE,
+    preview_excel, store_upload, get_upload,
+    parse_addresses_from_excel, generate_cleaned_excel,
+    start_batch_job_from_parsed,
 )
 
 app = Flask(__name__)
@@ -38,6 +41,47 @@ house_module = HousePriceModule(api_key=Config.VWORLD_API_KEY)
 commercial_module = CommercialPriceModule()
 
 lookup_cache = LookupCache()
+
+# 서버 측 PDF 데이터 캐시 (파일 기반, 멀티 워커 호환)
+import uuid as _uuid
+import json as _json
+import tempfile as _tempfile
+import os as _os
+
+_PDF_CACHE_DIR = _os.path.join(_tempfile.gettempdir(), "siga_pdf_cache")
+_os.makedirs(_PDF_CACHE_DIR, exist_ok=True)
+
+
+def _store_pdf_data(data: dict) -> str:
+    """PDF용 데이터를 파일에 저장하고 키를 반환한다."""
+    key = _uuid.uuid4().hex[:12]
+    path = _os.path.join(_PDF_CACHE_DIR, f"{key}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False)
+    # 오래된 파일 정리 (50개 초과 시)
+    files = sorted(
+        (_os.path.join(_PDF_CACHE_DIR, f) for f in _os.listdir(_PDF_CACHE_DIR) if f.endswith(".json")),
+        key=lambda p: _os.path.getmtime(p),
+    )
+    for old in files[:-50]:
+        try:
+            _os.remove(old)
+        except OSError:
+            pass
+    return key
+
+
+def _load_pdf_data(key: str) -> dict | None:
+    """파일에서 PDF 데이터를 로드한다."""
+    if not key:
+        return None
+    path = _os.path.join(_PDF_CACHE_DIR, f"{key}.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return _json.load(f)
+    except (FileNotFoundError, _json.JSONDecodeError):
+        return None
+
 
 MODULES = {
     "land": land_module,
@@ -160,8 +204,18 @@ def search():
             except Exception:
                 pass
 
-        # session에 auto 결과 저장 (PDF용)
-        session["last_auto"] = {
+        # 아파트/집합건물이 있으면 토지 공시지가 제거 (불필요)
+        if "apartment" in auto_results or "building" in auto_results:
+            auto_results.pop("land", None)
+
+        # 공동주택 결과가 많고 동/호 미입력 시 안내 플래그
+        show_dong_ho_guide = False
+        if "apartment" in auto_results and not (dong_no or ho_no):
+            if len(auto_results["apartment"]["result"].results) > 10:
+                show_dong_ho_guide = True
+
+        # 서버 측 캐시에 auto 결과 저장 (PDF용, 세션 쿠키 크기 제한 우회)
+        auto_data = {
             "address": address.get("_raw", ""),
             "year": year,
             "sections": {
@@ -173,6 +227,7 @@ def search():
                 for k, v in auto_results.items()
             },
         }
+        session["last_auto_key"] = _store_pdf_data(auto_data)
 
         return render_template(
             "results/auto.html",
@@ -180,6 +235,8 @@ def search():
             address=address.get("_raw", ""),
             year=year,
             source_info=SOURCE_INFO,
+            show_dong_ho_guide=show_dong_ho_guide,
+            apartment_count=len(auto_results["apartment"]["result"].results) if "apartment" in auto_results else 0,
         )
 
     address = _resolve_address(request.form)
@@ -218,7 +275,7 @@ def search():
     cached = lookup_cache.get(property_type, address, year)
     if cached:
         cached.cached = True
-        session["last_result"] = _result_to_dict(cached)
+        session["last_result_key"] = _store_pdf_data(_result_to_dict(cached))
         return render_template(template, result=cached, source_info=src_info)
 
     # ETAX용 추가 파라미터
@@ -237,7 +294,7 @@ def search():
     if result.success and result.results:
         lookup_cache.set(property_type, address, year, result)
 
-    session["last_result"] = _result_to_dict(result)
+    session["last_result_key"] = _store_pdf_data(_result_to_dict(result))
     return render_template(template, result=result, source_info=src_info)
 
 
@@ -245,20 +302,24 @@ def search():
 
 @app.route("/download/pdf", methods=["POST"])
 def download_pdf():
-    last = session.get("last_result")
+    key = session.get("last_result_key")
+    last = _load_pdf_data(key)
     if not last:
         return "조회 결과가 없습니다.", 400
     result = _dict_to_result(last)
-    return generate_pdf_response(result)
+    custom_filename = request.form.get("filename", "").strip() or None
+    return generate_pdf_response(result, filename=custom_filename)
 
 
 @app.route("/download/auto-pdf", methods=["POST"])
 def download_auto_pdf():
     from modules.pdf import generate_auto_pdf_response
-    last_auto = session.get("last_auto")
+    key = session.get("last_auto_key")
+    last_auto = _load_pdf_data(key)
     if not last_auto:
         return "조회 결과가 없습니다.", 400
-    return generate_auto_pdf_response(last_auto)
+    custom_filename = request.form.get("filename", "").strip() or None
+    return generate_auto_pdf_response(last_auto, filename=custom_filename)
 
 
 # ─── 주소 API ───
@@ -344,6 +405,7 @@ def batch_index():
 
 @app.route("/batch/upload", methods=["POST"])
 def batch_upload():
+    """Step 1: 파일만 받아서 헤더 + 미리보기를 반환한다."""
     file = request.files.get("file")
     if not file or not file.filename:
         return jsonify({"error": "파일을 선택해주세요."}), 400
@@ -355,12 +417,91 @@ def batch_upload():
     if len(file_bytes) > MAX_FILE_SIZE:
         return jsonify({"error": f"파일 크기가 {MAX_FILE_SIZE // (1024*1024)}MB를 초과합니다."}), 400
 
-    default_year = request.form.get("year", "").strip()
+    try:
+        info = preview_excel(file_bytes)
+        import uuid as _uid
+        upload_id = _uid.uuid4().hex[:12]
+        store_upload(
+            upload_id=upload_id,
+            file_bytes=file_bytes,
+            headers=info["headers"],
+            row_count=info["row_count"],
+            preview=info["preview"],
+        )
+        return jsonify({
+            "upload_id": upload_id,
+            "headers": info["headers"],
+            "row_count": info["row_count"],
+            "preview": info["preview"],
+        })
+    except Exception as e:
+        return jsonify({"error": f"파일 읽기 오류: {e}"}), 400
+
+
+@app.route("/batch/parse", methods=["POST"])
+def batch_parse():
+    """Step 2: 컬럼 선택 → 주소 파싱·분리 결과 반환."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "요청 데이터가 없습니다."}), 400
+
+    upload_id = data.get("upload_id", "")
+    cache = get_upload(upload_id)
+    if not cache:
+        return jsonify({"error": "업로드 세션이 만료되었습니다. 파일을 다시 업로드해주세요."}), 404
+
+    address_col = data.get("address_col")
+    if address_col is None:
+        return jsonify({"error": "주소 컬럼을 선택해주세요."}), 400
+    address_col = int(address_col)
+
+    year_col = data.get("year_col")
+    if year_col is not None and year_col != "":
+        year_col = int(year_col)
+    else:
+        year_col = None
+
+    default_year = data.get("default_year", "")
 
     try:
-        job_id = start_batch_job(
-            file_bytes=file_bytes,
-            default_year=default_year,
+        parsed = parse_addresses_from_excel(
+            cache.file_bytes, address_col, year_col, default_year,
+        )
+        cache.parsed_addresses = parsed
+        cache.default_year = default_year
+
+        split_count = sum(1 for a in parsed if a.get("split_from"))
+        original_count = len(set(a["original_row"] for a in parsed))
+
+        return jsonify({
+            "upload_id": upload_id,
+            "total": len(parsed),
+            "original_rows": original_count,
+            "split_count": split_count,
+            "addresses": parsed,
+        })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"파싱 오류: {e}"}), 500
+
+
+@app.route("/batch/start", methods=["POST"])
+def batch_start():
+    """Step 3: 캐시된 파싱 결과로 배치 작업을 시작한다."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "요청 데이터가 없습니다."}), 400
+
+    upload_id = data.get("upload_id", "")
+    cache = get_upload(upload_id)
+    if not cache or not cache.parsed_addresses:
+        return jsonify({"error": "파싱 결과가 없습니다. 다시 진행해주세요."}), 404
+
+    try:
+        job_id = start_batch_job_from_parsed(
+            parsed_addresses=cache.parsed_addresses,
+            default_year=cache.default_year,
             vworld_api_key=Config.VWORLD_API_KEY,
             land_module=land_module,
             apartment_module=apartment_module,
@@ -371,6 +512,23 @@ def batch_upload():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"처리 오류: {e}"}), 500
+
+
+@app.route("/batch/download-cleaned/<upload_id>")
+def batch_download_cleaned(upload_id):
+    """정리된 주소 엑셀을 다운로드한다."""
+    import io as _io
+    cache = get_upload(upload_id)
+    if not cache or not cache.parsed_addresses:
+        return "파싱 결과가 없습니다.", 404
+
+    cleaned_bytes = generate_cleaned_excel(cache.parsed_addresses)
+    return send_file(
+        _io.BytesIO(cleaned_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"정리된주소_{upload_id}.xlsx",
+    )
 
 
 @app.route("/batch/status/<job_id>")

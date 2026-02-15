@@ -1,6 +1,7 @@
 """Excel 일괄 조회 처리 엔진."""
 
 import io
+import re
 import threading
 import time
 import uuid
@@ -20,6 +21,26 @@ MAX_ROWS = 100
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 MAX_JOBS_KEPT = 20
 
+# ─── 업로드 캐시 ───
+
+MAX_UPLOADS_KEPT = 10
+_uploads: dict = {}
+_uploads_lock = threading.Lock()
+
+_ADDR_SPLIT_RE = re.compile(r'[\n,;]+')
+
+
+@dataclass
+class UploadCache:
+    upload_id: str
+    file_bytes: bytes
+    headers: list[str]
+    row_count: int
+    preview: list[list]
+    parsed_addresses: list[dict] | None = None
+    default_year: str = ""
+    created_at: float = field(default_factory=time.time)
+
 
 @dataclass
 class BatchJob:
@@ -38,6 +59,209 @@ def get_job(job_id: str) -> BatchJob | None:
     with _jobs_lock:
         return _jobs.get(job_id)
 
+
+# ─── 주소 분리 ───
+
+def split_addresses(text: str) -> list[str]:
+    """셀 내 복수 주소를 줄바꿈/쉼표/세미콜론으로 분리한다."""
+    parts = _ADDR_SPLIT_RE.split(text)
+    cleaned = [p.strip() for p in parts if p.strip()]
+    return cleaned if cleaned else [text.strip()]
+
+
+# ─── 업로드 캐시 관리 ───
+
+def store_upload(upload_id: str, file_bytes: bytes, headers: list[str],
+                 row_count: int, preview: list[list]) -> UploadCache:
+    cache = UploadCache(
+        upload_id=upload_id,
+        file_bytes=file_bytes,
+        headers=headers,
+        row_count=row_count,
+        preview=preview,
+    )
+    with _uploads_lock:
+        _uploads[upload_id] = cache
+        if len(_uploads) > MAX_UPLOADS_KEPT:
+            sorted_uploads = sorted(_uploads.values(), key=lambda u: u.created_at)
+            for old in sorted_uploads[: len(_uploads) - MAX_UPLOADS_KEPT]:
+                if old.upload_id != upload_id:
+                    del _uploads[old.upload_id]
+    return cache
+
+
+def get_upload(upload_id: str) -> UploadCache | None:
+    with _uploads_lock:
+        return _uploads.get(upload_id)
+
+
+# ─── 엑셀 미리보기 ───
+
+def preview_excel(file_bytes: bytes) -> dict:
+    """엑셀 파일의 헤더행 + 데이터 행 수 + 미리보기 5행을 반환한다."""
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
+    ws = wb.active
+
+    headers = []
+    preview_rows = []
+    row_count = 0
+
+    for idx, row in enumerate(ws.iter_rows(values_only=True)):
+        vals = [str(c) if c is not None else "" for c in row]
+        if idx == 0:
+            headers = vals
+            continue
+        row_count += 1
+        if len(preview_rows) < 5:
+            preview_rows.append(vals)
+
+    wb.close()
+    return {
+        "headers": headers,
+        "row_count": row_count,
+        "preview": preview_rows,
+    }
+
+
+# ─── 주소 파싱 ───
+
+def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
+                               year_col: int | None,
+                               default_year: str) -> list[dict]:
+    """선택된 컬럼에서 주소를 추출·분리하고 결과 리스트를 반환한다.
+
+    Returns:
+        [{row, address, year, original_row, split_from}, ...]
+        split_from 이 있으면 원본 셀에 복수 주소가 있었음을 의미.
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
+    ws = wb.active
+
+    results = []
+    for idx, row in enumerate(ws.iter_rows(values_only=True)):
+        if idx == 0:
+            continue  # 헤더행 스킵
+
+        vals = list(row)
+        if address_col >= len(vals) or not vals[address_col]:
+            continue
+
+        raw_addr = str(vals[address_col]).strip()
+        if not raw_addr:
+            continue
+
+        year = default_year
+        if year_col is not None and year_col < len(vals) and vals[year_col]:
+            year = str(vals[year_col]).strip()
+
+        addresses = split_addresses(raw_addr)
+        for addr in addresses:
+            results.append({
+                "row": idx + 1,  # 엑셀 행 번호 (1-based, 헤더 포함)
+                "address": addr,
+                "year": year,
+                "original_row": idx + 1,
+                "split_from": raw_addr if len(addresses) > 1 else None,
+            })
+
+    wb.close()
+
+    if len(results) > MAX_ROWS:
+        raise ValueError(f"최대 {MAX_ROWS}건까지 처리 가능합니다. (분리 후: {len(results)}건)")
+
+    return results
+
+
+# ─── 정리된 주소 엑셀 생성 ───
+
+def generate_cleaned_excel(addresses: list[dict]) -> bytes:
+    """파싱된 주소 리스트로 정리된 엑셀을 생성한다."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "정리된 주소"
+
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin", color="E2E8F0"),
+        right=Side(style="thin", color="E2E8F0"),
+        top=Side(style="thin", color="E2E8F0"),
+        bottom=Side(style="thin", color="E2E8F0"),
+    )
+
+    headers = ["#", "주소", "기준년도", "원본행번호"]
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+
+    for row_idx, entry in enumerate(addresses, 2):
+        values = [
+            row_idx - 1,
+            entry["address"],
+            entry["year"],
+            entry["original_row"],
+        ]
+        for col_idx, val in enumerate(values, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = thin_border
+
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["C"].width = 12
+    ws.column_dimensions["D"].width = 12
+
+    ws.auto_filter.ref = ws.dimensions
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ─── 파싱된 주소로 배치 작업 시작 ───
+
+def start_batch_job_from_parsed(
+    parsed_addresses: list[dict],
+    default_year: str,
+    vworld_api_key: str,
+    land_module,
+    apartment_module,
+    house_module,
+) -> str:
+    """이미 파싱된 주소 리스트로 배치 작업을 시작하고 job_id를 반환한다."""
+    if not parsed_addresses:
+        raise ValueError("조회할 주소가 없습니다.")
+
+    rows = [
+        {"row": a["row"], "address": a["address"], "year": a["year"] or default_year}
+        for a in parsed_addresses
+    ]
+
+    job_id = uuid.uuid4().hex[:12]
+    job = BatchJob(job_id=job_id, total=len(rows))
+
+    with _jobs_lock:
+        _jobs[job_id] = job
+        if len(_jobs) > MAX_JOBS_KEPT:
+            sorted_jobs = sorted(_jobs.values(), key=lambda j: j.created_at)
+            for old in sorted_jobs[: len(_jobs) - MAX_JOBS_KEPT]:
+                if old.job_id != job_id:
+                    del _jobs[old.job_id]
+
+    t = threading.Thread(
+        target=_process_batch,
+        args=(job, rows, default_year, vworld_api_key,
+              land_module, apartment_module, house_module),
+        daemon=True,
+    )
+    t.start()
+    return job_id
+
+
+# ─── 하위 호환: 기존 함수 유지 ───
 
 def parse_excel(file_bytes: bytes) -> list[dict]:
     """엑셀 파일을 파싱하여 [{row, address, year}, ...] 리스트를 반환한다."""
@@ -78,7 +302,6 @@ def start_batch_job(
 
     with _jobs_lock:
         _jobs[job_id] = job
-        # 오래된 작업 정리
         if len(_jobs) > MAX_JOBS_KEPT:
             sorted_jobs = sorted(_jobs.values(), key=lambda j: j.created_at)
             for old in sorted_jobs[: len(_jobs) - MAX_JOBS_KEPT]:
@@ -94,6 +317,8 @@ def start_batch_job(
     t.start()
     return job_id
 
+
+# ─── 배치 처리 ───
 
 def _process_batch(
     job: BatchJob,
