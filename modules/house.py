@@ -1,10 +1,10 @@
-"""개별주택가격 조회 — data.go.kr API."""
+"""개별주택가격 조회 — V-World API."""
 
 import requests
 
 from .base import BaseLookupModule, LookupResult
 
-API_URL = "http://apis.data.go.kr/1611000/nsdi/IndvdHousingPriceService/attr/getIndvdHousingPriceAttr"
+API_URL = "https://api.vworld.kr/ned/data/getIndvdHousingPriceAttr"
 
 
 class HousePriceModule(BaseLookupModule):
@@ -22,7 +22,7 @@ class HousePriceModule(BaseLookupModule):
 
     @property
     def source_name(self) -> str:
-        return "data.go.kr"
+        return "V-World"
 
     def search(self, address: dict, year: str = "", **kwargs) -> LookupResult:
         if not self.api_key:
@@ -31,17 +31,19 @@ class HousePriceModule(BaseLookupModule):
                 property_type_label=self.property_type_label,
                 address=address.get("_raw", ""), year=year,
                 source=self.source_name,
-                error="공공데이터포털 API 키가 설정되지 않았습니다.",
+                error="V-World API 키가 설정되지 않았습니다.",
             )
 
         pnu = address.get("pnu", "")
-        if not pnu:
+        adm_cd = address.get("adm_cd", "")
+        search_pnu = pnu or adm_cd
+        if not search_pnu:
             return LookupResult(
                 success=False, property_type=self.property_type,
                 property_type_label=self.property_type_label,
                 address=address.get("_raw", ""), year=year,
                 source=self.source_name,
-                error="PNU(필지고유번호)를 추출할 수 없습니다. 주소를 다시 선택해주세요.",
+                error="PNU 또는 법정동코드를 추출할 수 없습니다. 주소를 자동완성에서 선택해주세요.",
             )
 
         from datetime import datetime
@@ -49,8 +51,8 @@ class HousePriceModule(BaseLookupModule):
 
         try:
             params = {
-                "serviceKey": self.api_key,
-                "pnu": pnu,
+                "key": self.api_key,
+                "pnu": search_pnu,
                 "stdrYear": stdr_year,
                 "format": "json",
                 "numOfRows": 50,
@@ -67,11 +69,12 @@ class HousePriceModule(BaseLookupModule):
             results = []
             for item in items:
                 results.append({
-                    "pnu": item.get("pnu", ""),
                     "year": item.get("stdrYear", ""),
-                    "price": item.get("pblntfPc", ""),
-                    "building_area": item.get("buldTotAr", ""),
-                    "land_area": item.get("buldPlotAr", ""),
+                    "price": item.get("housePc", ""),
+                    "land_area": item.get("calcPlotAr", ""),
+                    "building_area": item.get("buldCalcTotAr", ""),
+                    "location": item.get("ldCodeNm", ""),
+                    "lot_number": item.get("mnnmSlno", ""),
                     "announcement_date": item.get("pblntfDe", ""),
                 })
 

@@ -34,7 +34,9 @@
         <tr>
           <th>#</th>
           <th>기준년도</th>
-          <th>공시가격 (만원)</th>
+          <th>소재지</th>
+          <th>지번</th>
+          <th>공시가격 (원)</th>
           <th>대지면적 (m2)</th>
           <th>건물총면적 (m2)</th>
           <th>공시일자</th>
@@ -45,6 +47,8 @@
         <tr>
           <td>{{ loop.index }}</td>
           <td>{{ row.get('year', '') }}</td>
+          <td>{{ row.get('location', '-') }}</td>
+          <td>{{ row.get('lot_number', '-') }}</td>
           <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
           <td>{{ row.get('land_area', '-') }}</td>
           <td>{{ row.get('building_area', '-') }}</td>

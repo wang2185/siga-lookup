@@ -1,10 +1,10 @@
-"""공동주택가격 조회 — data.go.kr API."""
+"""공동주택가격 조회 — V-World API."""
 
 import requests
 
 from .base import BaseLookupModule, LookupResult
 
-API_URL = "http://apis.data.go.kr/1611000/nsdi/ApartHousingPriceService/attr/getApartHousingPriceAttr"
+API_URL = "https://api.vworld.kr/ned/data/getApartHousingPriceAttr"
 
 
 class ApartmentPriceModule(BaseLookupModule):
@@ -22,7 +22,7 @@ class ApartmentPriceModule(BaseLookupModule):
 
     @property
     def source_name(self) -> str:
-        return "data.go.kr"
+        return "V-World"
 
     def search(self, address: dict, year: str = "", **kwargs) -> LookupResult:
         if not self.api_key:
@@ -31,17 +31,19 @@ class ApartmentPriceModule(BaseLookupModule):
                 property_type_label=self.property_type_label,
                 address=address.get("_raw", ""), year=year,
                 source=self.source_name,
-                error="공공데이터포털 API 키가 설정되지 않았습니다.",
+                error="V-World API 키가 설정되지 않았습니다.",
             )
 
         pnu = address.get("pnu", "")
-        if not pnu:
+        adm_cd = address.get("adm_cd", "")
+        search_pnu = pnu or adm_cd
+        if not search_pnu:
             return LookupResult(
                 success=False, property_type=self.property_type,
                 property_type_label=self.property_type_label,
                 address=address.get("_raw", ""), year=year,
                 source=self.source_name,
-                error="PNU(필지고유번호)를 추출할 수 없습니다. 주소를 다시 선택해주세요.",
+                error="PNU 또는 법정동코드를 추출할 수 없습니다. 주소를 자동완성에서 선택해주세요.",
             )
 
         from datetime import datetime
@@ -49,8 +51,8 @@ class ApartmentPriceModule(BaseLookupModule):
 
         try:
             params = {
-                "serviceKey": self.api_key,
-                "pnu": pnu,
+                "key": self.api_key,
+                "pnu": search_pnu,
                 "stdrYear": stdr_year,
                 "format": "json",
                 "numOfRows": 100,
@@ -67,13 +69,16 @@ class ApartmentPriceModule(BaseLookupModule):
             results = []
             for item in items:
                 results.append({
-                    "pnu": item.get("pnu", ""),
                     "year": item.get("stdrYear", ""),
-                    "price": item.get("pblntfPc", ""),
-                    "exclusive_area": item.get("exclusUseAr", ""),
-                    "building_name": item.get("bldgNm", ""),
+                    "building_name": item.get("aphusNm", ""),
+                    "building_type": item.get("aphusSeCodeNm", ""),
                     "dong": item.get("dongNm", ""),
                     "ho": item.get("hoNm", ""),
+                    "floor": item.get("floorNm", ""),
+                    "exclusive_area": item.get("prvuseAr", ""),
+                    "price": item.get("pblntfPc", ""),
+                    "location": item.get("ldCodeNm", ""),
+                    "lot_number": item.get("mnnmSlno", ""),
                 })
 
             return LookupResult(

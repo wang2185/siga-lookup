@@ -35,10 +35,13 @@
           <th>#</th>
           <th>기준년도</th>
           <th>건물명</th>
+          <th>주택유형</th>
           <th>동</th>
           <th>호</th>
+          <th>층</th>
           <th>전용면적 (m2)</th>
-          <th>공시가격 (만원)</th>
+          <th>공시가격 (원)</th>
+          <th>소재지</th>
         </tr>
       </thead>
       <tbody>
@@ -47,10 +50,13 @@
           <td>{{ loop.index }}</td>
           <td>{{ row.get('year', '') }}</td>
           <td>{{ row.get('building_name', '-') }}</td>
+          <td>{{ row.get('building_type', '-') }}</td>
           <td>{{ row.get('dong', '-') }}</td>
           <td>{{ row.get('ho', '-') }}</td>
+          <td>{{ row.get('floor', '-') }}</td>
           <td>{{ row.get('exclusive_area', '-') }}</td>
           <td class="price">{{ '{:,}'.format(row.get('price', 0)|int) if row.get('price') else '-' }}</td>
+          <td>{{ row.get('location', '-') }}</td>
         </tr>
         {% endfor %}
       </tbody>
