@@ -118,13 +118,14 @@ def parse_share(text: str) -> float | None:
 
 
 def format_share(ratio: float | None) -> str:
-    """지분 비율을 사람이 읽기 쉬운 문자열로 변환한다."""
+    """지분 비율을 분수(a/b) 형식으로 변환한다."""
     if ratio is None:
         return ""
-    pct = ratio * 100
-    if pct == int(pct):
-        return f"{int(pct)}%"
-    return f"{pct:.2f}%"
+    from fractions import Fraction
+    frac = Fraction(ratio).limit_denominator(1000)
+    if frac.denominator == 1:
+        return str(frac.numerator)
+    return f"{frac.numerator}/{frac.denominator}"
 
 
 def extract_share_from_address(addr: str) -> tuple[str, float | None, str]:
