@@ -16,12 +16,11 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 from .address import search_vworld, extract_address_components, parse_address
 
-# 전역 작업 관리
-_jobs: dict = {}
-_jobs_lock = threading.Lock()
-
+# 전역 작업 관리 (파일 기반, 멀티 워커 호환)
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_JOBS_KEPT = 20
+_JOBS_DIR = os.path.join(tempfile.gettempdir(), "siga_batch_jobs")
+os.makedirs(_JOBS_DIR, exist_ok=True)
 
 # ─── 업로드 캐시 (파일 기반, 멀티 워커 호환) ───
 
@@ -70,10 +69,84 @@ class BatchJob:
     output_bytes: bytes = b""
     created_at: float = field(default_factory=time.time)
 
+    # ─── 파일 기반 상태 관리 ───
+
+    def _job_dir(self) -> str:
+        d = os.path.join(_JOBS_DIR, self.job_id)
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def save_status(self):
+        """현재 상태를 파일에 저장한다 (output_bytes 제외)."""
+        data = {
+            "job_id": self.job_id,
+            "total": self.total,
+            "processed": self.processed,
+            "current_address": self.current_address,
+            "status": self.status,
+            "error": self.error,
+            "created_at": self.created_at,
+        }
+        path = os.path.join(self._job_dir(), "status.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+
+    def save_output(self):
+        """결과 엑셀 바이트를 파일에 저장한다."""
+        if self.output_bytes:
+            path = os.path.join(self._job_dir(), "output.xlsx")
+            with open(path, "wb") as f:
+                f.write(self.output_bytes)
+
 
 def get_job(job_id: str) -> BatchJob | None:
-    with _jobs_lock:
-        return _jobs.get(job_id)
+    """파일 기반으로 작업 상태를 로드한다."""
+    if not job_id:
+        return None
+    job_dir = os.path.join(_JOBS_DIR, job_id)
+    status_path = os.path.join(job_dir, "status.json")
+    if not os.path.isfile(status_path):
+        return None
+    try:
+        with open(status_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        job = BatchJob(
+            job_id=data["job_id"],
+            total=data.get("total", 0),
+            processed=data.get("processed", 0),
+            current_address=data.get("current_address", ""),
+            status=data.get("status", "pending"),
+            error=data.get("error", ""),
+            created_at=data.get("created_at", 0),
+        )
+        # 완료된 경우 output 바이트 로드
+        output_path = os.path.join(job_dir, "output.xlsx")
+        if os.path.isfile(output_path):
+            with open(output_path, "rb") as f:
+                job.output_bytes = f.read()
+        return job
+    except (json.JSONDecodeError, OSError, KeyError):
+        return None
+
+
+def _cleanup_jobs(keep_id: str = ""):
+    """오래된 작업 디렉토리를 정리한다."""
+    import shutil
+    try:
+        entries = []
+        for name in os.listdir(_JOBS_DIR):
+            d = os.path.join(_JOBS_DIR, name)
+            if os.path.isdir(d):
+                entries.append((d, os.path.getmtime(d)))
+        if len(entries) <= MAX_JOBS_KEPT:
+            return
+        entries.sort(key=lambda x: x[1])
+        for d, _ in entries[: len(entries) - MAX_JOBS_KEPT]:
+            if keep_id and os.path.basename(d) == keep_id:
+                continue
+            shutil.rmtree(d, ignore_errors=True)
+    except OSError:
+        pass
 
 
 # ─── 주소 분리 ───
@@ -552,69 +625,8 @@ def start_batch_job_from_parsed(
 
     job_id = uuid.uuid4().hex[:12]
     job = BatchJob(job_id=job_id, total=len(rows))
-
-    with _jobs_lock:
-        _jobs[job_id] = job
-        if len(_jobs) > MAX_JOBS_KEPT:
-            sorted_jobs = sorted(_jobs.values(), key=lambda j: j.created_at)
-            for old in sorted_jobs[: len(_jobs) - MAX_JOBS_KEPT]:
-                if old.job_id != job_id:
-                    del _jobs[old.job_id]
-
-    t = threading.Thread(
-        target=_process_batch,
-        args=(job, rows, default_year, vworld_api_key,
-              land_module, apartment_module, house_module),
-        daemon=True,
-    )
-    t.start()
-    return job_id
-
-
-# ─── 하위 호환: 기존 함수 유지 ───
-
-def parse_excel(file_bytes: bytes) -> list[dict]:
-    """엑셀 파일을 파싱하여 [{row, address, year}, ...] 리스트를 반환한다."""
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
-    ws = wb.active
-    rows = []
-    for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        if not row or not row[0]:
-            continue
-        address = str(row[0]).strip()
-        if not address:
-            continue
-        year = ""
-        if len(row) > 1 and row[1]:
-            year = str(row[1]).strip()
-        rows.append({"row": idx, "address": address, "year": year})
-    wb.close()
-    return rows
-
-
-def start_batch_job(
-    file_bytes: bytes,
-    default_year: str,
-    vworld_api_key: str,
-    land_module,
-    apartment_module,
-    house_module,
-) -> str:
-    """배치 작업을 시작하고 job_id를 반환한다."""
-    rows = parse_excel(file_bytes)
-    if not rows:
-        raise ValueError("엑셀에 조회할 주소가 없습니다.")
-
-    job_id = uuid.uuid4().hex[:12]
-    job = BatchJob(job_id=job_id, total=len(rows))
-
-    with _jobs_lock:
-        _jobs[job_id] = job
-        if len(_jobs) > MAX_JOBS_KEPT:
-            sorted_jobs = sorted(_jobs.values(), key=lambda j: j.created_at)
-            for old in sorted_jobs[: len(_jobs) - MAX_JOBS_KEPT]:
-                if old.job_id != job_id:
-                    del _jobs[old.job_id]
+    job.save_status()
+    _cleanup_jobs(job_id)
 
     t = threading.Thread(
         target=_process_batch,
@@ -639,6 +651,7 @@ def _process_batch(
 ):
     """백그라운드에서 각 주소를 조회한다."""
     job.status = "processing"
+    job.save_status()
 
     for entry in rows:
         addr_str = entry["address"]
@@ -744,15 +757,19 @@ def _process_batch(
 
         job.results.append(result_row)
         job.processed += 1
+        job.save_status()
         time.sleep(0.3)
 
     # 결과 엑셀 생성
     try:
         job.output_bytes = _generate_output_excel(job.results)
         job.status = "completed"
+        job.save_status()
+        job.save_output()
     except Exception as e:
         job.status = "error"
         job.error = f"엑셀 생성 오류: {e}"
+        job.save_status()
 
 
 def _resolve_address_for_batch(addr_str: str, vworld_api_key: str) -> dict:
