@@ -27,6 +27,8 @@ _uploads: dict = {}
 _uploads_lock = threading.Lock()
 
 _ADDR_SPLIT_RE = re.compile(r'[\n,;]+')
+_SHARE_FRAC_RE = re.compile(r'(\d+)\s*/\s*(\d+)')  # 1/2, 3/10
+_SHARE_PCT_RE = re.compile(r'([\d.]+)\s*%')  # 50%, 33.33%
 
 
 @dataclass
@@ -66,6 +68,47 @@ def split_addresses(text: str) -> list[str]:
     parts = _ADDR_SPLIT_RE.split(text)
     cleaned = [p.strip() for p in parts if p.strip()]
     return cleaned if cleaned else [text.strip()]
+
+
+def parse_share(text: str) -> float | None:
+    """지분 문자열을 0~1 사이 비율로 변환한다. 실패 시 None 반환."""
+    if not text:
+        return None
+    text = str(text).strip()
+    if not text:
+        return None
+
+    # 분수: 1/2, 3/10
+    m = _SHARE_FRAC_RE.search(text)
+    if m:
+        numer, denom = int(m.group(1)), int(m.group(2))
+        if denom > 0:
+            return numer / denom
+
+    # 퍼센트: 50%, 33.33%
+    m = _SHARE_PCT_RE.search(text)
+    if m:
+        return float(m.group(1)) / 100
+
+    # 소수: 0.5, 1 (1이면 지분 없는 것과 동일)
+    try:
+        val = float(text)
+        if 0 < val <= 1:
+            return val
+    except (ValueError, TypeError):
+        pass
+
+    return None
+
+
+def format_share(ratio: float | None) -> str:
+    """지분 비율을 사람이 읽기 쉬운 문자열로 변환한다."""
+    if ratio is None:
+        return ""
+    pct = ratio * 100
+    if pct == int(pct):
+        return f"{int(pct)}%"
+    return f"{pct:.2f}%"
 
 
 # ─── 업로드 캐시 관리 ───
@@ -126,11 +169,12 @@ def preview_excel(file_bytes: bytes) -> dict:
 
 def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
                                year_col: int | None,
-                               default_year: str) -> list[dict]:
+                               default_year: str,
+                               share_col: int | None = None) -> list[dict]:
     """선택된 컬럼에서 주소를 추출·분리하고 결과 리스트를 반환한다.
 
     Returns:
-        [{row, address, year, original_row, split_from}, ...]
+        [{row, address, year, share, share_raw, original_row, split_from}, ...]
         split_from 이 있으면 원본 셀에 복수 주소가 있었음을 의미.
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
@@ -153,12 +197,22 @@ def parse_addresses_from_excel(file_bytes: bytes, address_col: int,
         if year_col is not None and year_col < len(vals) and vals[year_col]:
             year = str(vals[year_col]).strip()
 
+        # 지분 파싱
+        share_raw = ""
+        share_ratio = None
+        if share_col is not None and share_col < len(vals) and vals[share_col]:
+            share_raw = str(vals[share_col]).strip()
+            share_ratio = parse_share(share_raw)
+
         addresses = split_addresses(raw_addr)
         for addr in addresses:
             results.append({
                 "row": idx + 1,  # 엑셀 행 번호 (1-based, 헤더 포함)
                 "address": addr,
                 "year": year,
+                "share": share_ratio,
+                "share_raw": share_raw,
+                "share_display": format_share(share_ratio),
                 "original_row": idx + 1,
                 "split_from": raw_addr if len(addresses) > 1 else None,
             })
@@ -186,7 +240,12 @@ def generate_cleaned_excel(addresses: list[dict]) -> bytes:
         bottom=Side(style="thin", color="E2E8F0"),
     )
 
-    headers = ["#", "주소", "기준년도", "원본행번호"]
+    has_share = any(a.get("share") is not None for a in addresses)
+    headers = ["#", "주소", "기준년도"]
+    if has_share:
+        headers.append("지분")
+    headers.append("원본행번호")
+
     for col_idx, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=h)
         cell.font = header_font
@@ -199,8 +258,11 @@ def generate_cleaned_excel(addresses: list[dict]) -> bytes:
             row_idx - 1,
             entry["address"],
             entry["year"],
-            entry["original_row"],
         ]
+        if has_share:
+            values.append(entry.get("share_display", ""))
+        values.append(entry["original_row"])
+
         for col_idx, val in enumerate(values, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
             cell.border = thin_border
@@ -208,7 +270,11 @@ def generate_cleaned_excel(addresses: list[dict]) -> bytes:
     ws.column_dimensions["A"].width = 5
     ws.column_dimensions["B"].width = 40
     ws.column_dimensions["C"].width = 12
-    ws.column_dimensions["D"].width = 12
+    if has_share:
+        ws.column_dimensions["D"].width = 12
+        ws.column_dimensions["E"].width = 12
+    else:
+        ws.column_dimensions["D"].width = 12
 
     ws.auto_filter.ref = ws.dimensions
 
@@ -232,7 +298,13 @@ def start_batch_job_from_parsed(
         raise ValueError("조회할 주소가 없습니다.")
 
     rows = [
-        {"row": a["row"], "address": a["address"], "year": a["year"] or default_year}
+        {
+            "row": a["row"],
+            "address": a["address"],
+            "year": a["year"] or default_year,
+            "share": a.get("share"),
+            "share_display": a.get("share_display", ""),
+        }
         for a in parsed_addresses
     ]
 
@@ -331,17 +403,25 @@ def _process_batch(
         year = entry["year"] or default_year
         job.current_address = addr_str
 
+        share = entry.get("share")
+        share_display = entry.get("share_display", "")
+
         result_row = {
             "row_num": entry["row"],
             "address": addr_str,
             "pnu": "",
             "year": year,
+            "share": share,
+            "share_display": share_display,
             "land_price_per_sqm": "",
             "land_area": "",
             "land_total_price": "",
+            "land_total_price_share": "",
             "apt_building_name": "",
             "apt_price": "",
+            "apt_price_share": "",
             "house_price": "",
+            "house_price_share": "",
             "status": "",
         }
 
@@ -368,6 +448,11 @@ def _process_batch(
                     result_row["land_price_per_sqm"] = first.get("price_per_sqm", "")
                     result_row["land_area"] = first.get("land_area", "")
                     result_row["land_total_price"] = first.get("total_price", "")
+                    if share is not None and first.get("total_price"):
+                        try:
+                            result_row["land_total_price_share"] = int(float(first["total_price"]) * share)
+                        except (ValueError, TypeError):
+                            pass
                     found_types.append("토지")
             except Exception:
                 pass
@@ -380,6 +465,11 @@ def _process_batch(
                     first = apt_result.results[0]
                     result_row["apt_building_name"] = first.get("building_name", "")
                     result_row["apt_price"] = first.get("price", "")
+                    if share is not None and first.get("price"):
+                        try:
+                            result_row["apt_price_share"] = int(float(first["price"]) * share)
+                        except (ValueError, TypeError):
+                            pass
                     found_types.append("공동주택")
             except Exception:
                 pass
@@ -391,6 +481,11 @@ def _process_batch(
                 if house_result.success and house_result.results:
                     first = house_result.results[0]
                     result_row["house_price"] = first.get("price", "")
+                    if share is not None and first.get("price"):
+                        try:
+                            result_row["house_price_share"] = int(float(first["price"]) * share)
+                        except (ValueError, TypeError):
+                            pass
                     found_types.append("개별주택")
             except Exception:
                 pass
@@ -450,13 +545,28 @@ def _generate_output_excel(results: list[dict]) -> bytes:
     )
     price_font = Font(bold=True, color="2563EB")
 
-    headers = [
-        "#", "주소", "PNU", "기준년도",
+    # 지분 데이터가 있는지 확인
+    has_share = any(r.get("share") is not None for r in results)
+
+    headers = ["#", "주소", "PNU", "기준년도"]
+    if has_share:
+        headers.append("지분")
+    headers += [
         "토지_공시지가(원/m²)", "토지_면적(m²)", "토지_총액(원)",
-        "공동주택_건물명", "공동주택_공시가격(원)",
-        "개별주택_공시가격(원)",
-        "조회상태",
     ]
+    if has_share:
+        headers.append("토지_지분적용(원)")
+    headers += [
+        "공동주택_건물명", "공동주택_공시가격(원)",
+    ]
+    if has_share:
+        headers.append("공동주택_지분적용(원)")
+    headers += [
+        "개별주택_공시가격(원)",
+    ]
+    if has_share:
+        headers.append("개별주택_지분적용(원)")
+    headers.append("조회상태")
 
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=header)
@@ -465,32 +575,75 @@ def _generate_output_excel(results: list[dict]) -> bytes:
         cell.alignment = header_align
         cell.border = thin_border
 
+    share_fill = PatternFill(start_color="FFF7ED", end_color="FFF7ED", fill_type="solid")
+    share_font = Font(bold=True, color="D97706")
+
     for row_idx, row_data in enumerate(results, 2):
         values = [
             row_idx - 1,
             row_data.get("address", ""),
             row_data.get("pnu", ""),
             row_data.get("year", ""),
+        ]
+        if has_share:
+            values.append(row_data.get("share_display", ""))
+        values += [
             _to_number(row_data.get("land_price_per_sqm", "")),
             _to_number(row_data.get("land_area", "")),
             _to_number(row_data.get("land_total_price", "")),
+        ]
+        if has_share:
+            values.append(_to_number(row_data.get("land_total_price_share", "")))
+        values += [
             row_data.get("apt_building_name", ""),
             _to_number(row_data.get("apt_price", "")),
-            _to_number(row_data.get("house_price", "")),
-            row_data.get("status", ""),
         ]
+        if has_share:
+            values.append(_to_number(row_data.get("apt_price_share", "")))
+        values += [
+            _to_number(row_data.get("house_price", "")),
+        ]
+        if has_share:
+            values.append(_to_number(row_data.get("house_price_share", "")))
+        values.append(row_data.get("status", ""))
+
         for col_idx, val in enumerate(values, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
             cell.border = thin_border
-            # 가격 컬럼 스타일
-            if col_idx in (5, 7, 9, 10) and val:
+
+        # 가격 컬럼 + 지분적용 컬럼 스타일
+        for col_idx, val in enumerate(values, 1):
+            header_name = headers[col_idx - 1] if col_idx <= len(headers) else ""
+            cell = ws.cell(row=row_idx, column=col_idx)
+            if "지분적용" in header_name and val:
+                cell.font = share_font
+                cell.fill = share_fill
+                cell.number_format = "#,##0"
+            elif header_name in ("토지_공시지가(원/m²)", "토지_총액(원)",
+                                 "공동주택_공시가격(원)", "개별주택_공시가격(원)") and val:
                 cell.font = price_font
                 cell.number_format = "#,##0"
 
     # 열 너비 설정
-    widths = [5, 35, 22, 10, 18, 12, 18, 20, 20, 20, 15]
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    for i in range(1, len(headers) + 1):
+        col_letter = openpyxl.utils.get_column_letter(i)
+        h = headers[i - 1]
+        if h == "#":
+            ws.column_dimensions[col_letter].width = 5
+        elif h == "주소":
+            ws.column_dimensions[col_letter].width = 35
+        elif h == "PNU":
+            ws.column_dimensions[col_letter].width = 22
+        elif h in ("기준년도", "지분"):
+            ws.column_dimensions[col_letter].width = 10
+        elif "건물명" in h:
+            ws.column_dimensions[col_letter].width = 20
+        elif "면적" in h:
+            ws.column_dimensions[col_letter].width = 12
+        elif "조회상태" in h:
+            ws.column_dimensions[col_letter].width = 15
+        else:
+            ws.column_dimensions[col_letter].width = 18
 
     # 필터 설정
     ws.auto_filter.ref = ws.dimensions

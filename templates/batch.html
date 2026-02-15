@@ -55,6 +55,14 @@
     </div>
 
     <div class="form-group">
+      <label class="form-label" for="shareCol">지분 컬럼 (선택)</label>
+      <select id="shareCol" class="form-select">
+        <option value="">-- 사용 안함 --</option>
+      </select>
+      <p style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">지분 비율 (예: 1/2, 50%, 0.5 등). 지분이 있으면 적용된 가격도 함께 표시됩니다.</p>
+    </div>
+
+    <div class="form-group">
       <label class="form-label" for="defaultYear">기본 기준년도 (컬럼 없을 때 적용)</label>
       <select id="defaultYear" class="form-select" style="max-width:200px;">
         <option value="">전체</option>
@@ -93,6 +101,7 @@
             <th>#</th>
             <th>주소</th>
             <th>기준년도</th>
+            <th>지분</th>
             <th>원본행</th>
           </tr>
         </thead>

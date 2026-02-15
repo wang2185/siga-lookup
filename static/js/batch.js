@@ -10,6 +10,7 @@
 
   const addressColSel = document.getElementById("addressCol");
   const yearColSel = document.getElementById("yearCol");
+  const shareColSel = document.getElementById("shareCol");
   const defaultYearSel = document.getElementById("defaultYear");
   const previewTableWrapper = document.getElementById("previewTableWrapper");
   const previewTable = document.getElementById("previewTable");
@@ -156,12 +157,15 @@
   function populateColumnSelects(headers) {
     addressColSel.innerHTML = '<option value="">-- 주소 컬럼을 선택하세요 --</option>';
     yearColSel.innerHTML = '<option value="">-- 사용 안함 --</option>';
+    shareColSel.innerHTML = '<option value="">-- 사용 안함 --</option>';
 
     var addrAutoIdx = -1;
     var yearAutoIdx = -1;
+    var shareAutoIdx = -1;
 
     var addrKeywords = ["주소", "소재지", "지번", "도로명", "address", "addr", "위치", "소재"];
     var yearKeywords = ["년도", "연도", "year", "기준"];
+    var shareKeywords = ["지분", "share", "持分", "비율", "소유비율", "ownership"];
 
     headers.forEach(function (h, i) {
       var colLetter = String.fromCharCode(65 + (i % 26));
@@ -178,6 +182,11 @@
       optY.textContent = displayLabel;
       yearColSel.appendChild(optY);
 
+      var optS = document.createElement("option");
+      optS.value = i;
+      optS.textContent = displayLabel;
+      shareColSel.appendChild(optS);
+
       // 자동 감지
       var lower = (h || "").toLowerCase();
       if (addrAutoIdx < 0) {
@@ -190,12 +199,18 @@
           if (lower.indexOf(yearKeywords[k]) >= 0) { yearAutoIdx = i; break; }
         }
       }
+      if (shareAutoIdx < 0) {
+        for (var k = 0; k < shareKeywords.length; k++) {
+          if (lower.indexOf(shareKeywords[k]) >= 0) { shareAutoIdx = i; break; }
+        }
+      }
     });
 
     if (addrAutoIdx >= 0) {
       addressColSel.value = addrAutoIdx;
     }
     if (yearAutoIdx >= 0) yearColSel.value = yearAutoIdx;
+    if (shareAutoIdx >= 0) shareColSel.value = shareAutoIdx;
 
     // 주소 컬럼 미선택 시 분석 버튼 비활성화
     updateParseBtn();
@@ -215,12 +230,14 @@
 
     var addrIdx = addressColSel.value !== "" ? parseInt(addressColSel.value, 10) : -1;
     var yearIdx = yearColSel.value !== "" ? parseInt(yearColSel.value, 10) : -1;
+    var shareIdx = shareColSel.value !== "" ? parseInt(shareColSel.value, 10) : -1;
 
     var html = "<thead><tr>";
     headers.forEach(function (h, i) {
       var cls = "";
       if (i === addrIdx) cls = ' style="background:#dbeafe;color:var(--primary);font-weight:700;"';
       else if (i === yearIdx) cls = ' style="background:#f0fdf4;color:var(--success);font-weight:700;"';
+      else if (i === shareIdx) cls = ' style="background:#fff7ed;color:var(--warning);font-weight:700;"';
       html += "<th" + cls + ">" + escapeHtml(h || "") + "</th>";
     });
     html += "</tr></thead><tbody>";
@@ -231,6 +248,7 @@
         var cls = "";
         if (i === addrIdx) cls = ' style="background:#eff6ff;"';
         else if (i === yearIdx) cls = ' style="background:#f0fdf4;"';
+        else if (i === shareIdx) cls = ' style="background:#fff7ed;"';
         html += "<td" + cls + ">" + escapeHtml(cell || "") + "</td>";
       });
       html += "</tr>";
@@ -246,6 +264,9 @@
     if (uploadData) renderPreviewTable(uploadData.headers, uploadData.preview);
   });
   yearColSel.addEventListener("change", function () {
+    if (uploadData) renderPreviewTable(uploadData.headers, uploadData.preview);
+  });
+  shareColSel.addEventListener("change", function () {
     if (uploadData) renderPreviewTable(uploadData.headers, uploadData.preview);
   });
 
@@ -269,6 +290,7 @@
           upload_id: uploadId,
           address_col: parseInt(addressColSel.value, 10),
           year_col: yearColSel.value !== "" ? parseInt(yearColSel.value, 10) : null,
+          share_col: shareColSel.value !== "" ? parseInt(shareColSel.value, 10) : null,
           default_year: defaultYearSel.value,
         }),
       });
@@ -313,6 +335,7 @@
       html += "<td>" + (i + 1) + "</td>";
       html += "<td>" + escapeHtml(a.address) + "</td>";
       html += "<td>" + escapeHtml(a.year || "") + "</td>";
+      html += "<td>" + escapeHtml(a.share_display || "") + "</td>";
       html += "<td>" + a.original_row + "</td>";
       html += "</tr>";
     });
