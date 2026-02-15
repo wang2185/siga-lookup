@@ -114,6 +114,7 @@
     uploadBtn.disabled = true;
     uploadBtn.textContent = "분석 중...";
     errorSection.style.display = "none";
+    document.getElementById("uploadProgress").style.display = "block";
 
     var formData = new FormData();
     formData.append("file", fileInput.files[0]);
@@ -122,6 +123,7 @@
       var resp = await fetch("/batch/upload", { method: "POST", body: formData });
       var data = await resp.json();
 
+      document.getElementById("uploadProgress").style.display = "none";
       if (!resp.ok || data.error) {
         showError(data.error || "업로드 실패");
         uploadBtn.disabled = false;
@@ -142,6 +144,7 @@
       }
       showStep(1);
     } catch (err) {
+      document.getElementById("uploadProgress").style.display = "none";
       showError("네트워크 오류: " + err.message);
       uploadBtn.disabled = false;
       uploadBtn.textContent = "파일 분석하기";
@@ -256,6 +259,7 @@
     parseBtn.disabled = true;
     parseBtn.textContent = "분석 중...";
     errorSection.style.display = "none";
+    document.getElementById("parseProgress").style.display = "block";
 
     try {
       var resp = await fetch("/batch/parse", {
@@ -283,6 +287,7 @@
     } catch (err) {
       showError("네트워크 오류: " + err.message);
     } finally {
+      document.getElementById("parseProgress").style.display = "none";
       parseBtn.disabled = false;
       parseBtn.textContent = "주소 분석하기";
     }
@@ -324,6 +329,7 @@
     startBatchBtn.disabled = true;
     startBatchBtn.textContent = "시작 중...";
     errorSection.style.display = "none";
+    document.getElementById("startProgress").style.display = "block";
 
     try {
       var resp = await fetch("/batch/start", {
@@ -333,6 +339,7 @@
       });
       var data = await resp.json();
 
+      document.getElementById("startProgress").style.display = "none";
       if (!resp.ok || data.error) {
         showError(data.error || "시작 실패");
         startBatchBtn.disabled = false;
@@ -345,6 +352,7 @@
       progressSection.style.display = "block";
       pollStatus(jobId);
     } catch (err) {
+      document.getElementById("startProgress").style.display = "none";
       showError("네트워크 오류: " + err.message);
       startBatchBtn.disabled = false;
       startBatchBtn.textContent = "일괄 조회 시작";

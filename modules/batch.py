@@ -17,7 +17,7 @@ from .address import search_vworld, extract_address_components, parse_address
 _jobs: dict = {}
 _jobs_lock = threading.Lock()
 
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_JOBS_KEPT = 20
 
 # ─── 업로드 캐시 ───

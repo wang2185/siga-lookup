@@ -10,7 +10,7 @@
 
   <!-- Step 1: 파일 업로드 -->
   <div id="step1-upload">
-    <p class="batch-step-desc">Step 1. 엑셀 파일을 업로드하세요. (파일 크기 5MB 이하)</p>
+    <p class="batch-step-desc">Step 1. 엑셀 파일을 업로드하세요. (파일 크기 10MB 이하)</p>
 
     <div style="margin-bottom:16px;">
       <a href="/batch/template" class="btn btn-secondary" style="display:inline-flex;align-items:center;gap:6px;">
@@ -29,6 +29,10 @@
       <button type="submit" id="uploadBtn" class="btn btn-primary" style="width:100%;margin-top:16px;" disabled>
         파일 분석하기
       </button>
+      <div id="uploadProgress" class="batch-inline-progress" style="display:none;">
+        <div class="batch-inline-progress-text">파일 업로드 중...</div>
+        <div class="batch-progress-bar"><div class="batch-progress-fill batch-progress-indeterminate" id="uploadProgressFill"></div></div>
+      </div>
     </form>
   </div>
 
@@ -68,6 +72,10 @@
       <button type="button" id="backToStep1" class="btn btn-secondary">뒤로</button>
       <button type="button" id="parseBtn" class="btn btn-primary" style="flex:1;">주소 분석하기</button>
     </div>
+    <div id="parseProgress" class="batch-inline-progress" style="display:none;">
+      <div class="batch-inline-progress-text">주소 분석 중...</div>
+      <div class="batch-progress-bar"><div class="batch-progress-fill batch-progress-indeterminate" id="parseProgressFill"></div></div>
+    </div>
   </div>
 
   <!-- Step 3: 주소 분석 결과 확인 -->
@@ -96,6 +104,10 @@
       <button type="button" id="backToStep2" class="btn btn-secondary">뒤로</button>
       <a id="downloadCleanedLink" href="#" class="btn btn-download" style="flex:1;text-align:center;">정리된 주소 다운로드</a>
       <button type="button" id="startBatchBtn" class="btn btn-primary" style="flex:1;">일괄 조회 시작</button>
+    </div>
+    <div id="startProgress" class="batch-inline-progress" style="display:none;">
+      <div class="batch-inline-progress-text">조회 작업 준비 중...</div>
+      <div class="batch-progress-bar"><div class="batch-progress-fill batch-progress-indeterminate" id="startProgressFill"></div></div>
     </div>
   </div>
 

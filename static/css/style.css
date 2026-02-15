@@ -311,6 +311,28 @@ input[type="text"]:focus, select:focus {
   padding: 8px 0;
 }
 
+.batch-inline-progress {
+  margin-top: 12px;
+}
+
+.batch-inline-progress-text {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.batch-progress-indeterminate {
+  width: 30% !important;
+  animation: indeterminate 1.5s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  0% { margin-left: 0; width: 30%; }
+  50% { margin-left: 35%; width: 40%; }
+  100% { margin-left: 70%; width: 30%; }
+}
+
 .pdf-filename-input {
   font-family: inherit;
 }
