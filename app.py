@@ -136,6 +136,58 @@ def _get_module(property_type: str, address: dict):
     return MODULES.get(property_type)
 
 
+def _resolve_pnu(addr: dict, address_str: str) -> dict:
+    """PNU가 없으면 V-World / Juso 주소 검색으로 자동 보정한다.
+
+    parse_address()만으로는 PNU를 얻을 수 없기 때문에,
+    주소 검색 API → extract_address_components() → PNU 추출 과정을 거친다.
+    """
+    if addr.get("pnu"):
+        return addr
+
+    # V-World 주소 검색 시도
+    api_key = Config.VWORLD_API_KEY
+    if api_key:
+        result = search_vworld(address_str, api_key, count=3)
+        items = result.get("items", [])
+        if items:
+            # 첫 번째 결과에서 PNU 추출
+            comp = extract_address_components(items[0])
+            if comp.get("pnu"):
+                app.logger.info("[PNU-RESOLVE] V-World resolved PNU=%s for '%s'",
+                                comp["pnu"], address_str)
+                # parse_address 결과에 PNU 관련 필드 병합
+                for key in ("pnu", "adm_cd", "bd_mgt_sn", "road_addr", "jibun_addr"):
+                    if comp.get(key):
+                        addr[key] = comp[key]
+                # sido/sigungu/dong/bonji 보완 (비어 있을 때만)
+                for key in ("sido", "sigungu", "dong", "bonji", "bunji"):
+                    if not addr.get(key) and comp.get(key):
+                        addr[key] = comp[key]
+                return addr
+
+    # V-World 실패 시 Juso.go.kr 폴백
+    juso_key = Config.JUSO_API_KEY
+    if juso_key:
+        result = search_juso(address_str, juso_key, count=3)
+        items = result.get("items", [])
+        if items:
+            comp = extract_address_components(items[0])
+            if comp.get("pnu"):
+                app.logger.info("[PNU-RESOLVE] Juso resolved PNU=%s for '%s'",
+                                comp["pnu"], address_str)
+                for key in ("pnu", "adm_cd", "bd_mgt_sn", "road_addr", "jibun_addr"):
+                    if comp.get(key):
+                        addr[key] = comp[key]
+                for key in ("sido", "sigungu", "dong", "bonji", "bunji"):
+                    if not addr.get(key) and comp.get(key):
+                        addr[key] = comp[key]
+                return addr
+
+    app.logger.warning("[PNU-RESOLVE] Failed to resolve PNU for '%s'", address_str)
+    return addr
+
+
 def perform_search(address_str: str, property_type: str = "", year: str = "",
                    dong_no: str = "", ho_no: str = "") -> dict:
     """Core search logic for JSON API.
@@ -144,6 +196,9 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
     """
     addr = parse_address(address_str)
     addr["_raw"] = address_str
+
+    # PNU 자동 보정: parse_address만으로는 PNU가 없으므로 주소 검색 API로 보완
+    addr = _resolve_pnu(addr, address_str)
 
     # Auto mode (유형 미선택)
     if property_type not in PROPERTY_TYPES:
