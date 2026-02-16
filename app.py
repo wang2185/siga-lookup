@@ -808,6 +808,26 @@ def batch_download(job_id):
     )
 
 
+@app.route("/batch/download-excel/<job_id>")
+def batch_download_excel(job_id):
+    """요약 엑셀만 별도 다운로드한다."""
+    import io as _io
+    import os
+    from modules.batch import _JOBS_DIR
+    xlsx_path = os.path.join(_JOBS_DIR, job_id, "output.xlsx")
+    if not os.path.isfile(xlsx_path):
+        return "엑셀 파일을 찾을 수 없습니다.", 404
+
+    with open(xlsx_path, "rb") as f:
+        xlsx_bytes = f.read()
+    return send_file(
+        _io.BytesIO(xlsx_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"조회결과_{job_id}.xlsx",
+    )
+
+
 @app.route("/batch/template")
 def batch_template():
     import io

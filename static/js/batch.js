@@ -42,6 +42,7 @@
   var currentAddress = document.getElementById("currentAddress");
   var completeSection = document.getElementById("completeSection");
   var downloadLink = document.getElementById("downloadLink");
+  var downloadExcelLink = document.getElementById("downloadExcelLink");
   var errorSection = document.getElementById("errorSection");
   var errorMessage = document.getElementById("errorMessage");
 
@@ -563,6 +564,7 @@
               data.processed + "/" + data.total + "건 처리됨. 아래 버튼을 클릭하여 결과를 다운로드하세요.";
           }
           downloadLink.href = "/batch/download/" + jid;
+          if (downloadExcelLink) downloadExcelLink.href = "/batch/download-excel/" + jid;
         } else if (data.status === "cancelled") {
           clearInterval(pollInterval);
           progressSection.style.display = "none";
@@ -574,6 +576,7 @@
                 data.processed + "/" + data.total + "건까지 처리된 결과를 다운로드할 수 있습니다.";
             }
             downloadLink.href = "/batch/download/" + jid;
+            if (downloadExcelLink) downloadExcelLink.href = "/batch/download-excel/" + jid;
           } else {
             showError(data.error || "작업이 취소되었습니다.");
           }

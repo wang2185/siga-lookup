@@ -910,6 +910,12 @@ def _process_batch(
     # ZIP 생성 (PDF + 요약 엑셀)
     try:
         excel_bytes = _generate_output_excel(job.results)
+
+        # 요약 엑셀 별도 저장 (엑셀만 다운로드용)
+        xlsx_path = os.path.join(job._job_dir(), "output.xlsx")
+        with open(xlsx_path, "wb") as f:
+            f.write(excel_bytes)
+
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for fname, fpath in pdf_files:
