@@ -8,13 +8,14 @@ import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-from .address import search_vworld, extract_address_components, parse_address
+from .address import search_vworld, extract_address_components, parse_address, filter_apartment_by_dong_ho
 
 # 전역 작업 관리 (파일 기반, 멀티 워커 호환)
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -98,6 +99,21 @@ class BatchJob:
             with open(path, "wb") as f:
                 f.write(self.output_bytes)
 
+    def is_cancelled(self) -> bool:
+        """취소 요청이 있는지 확인한다."""
+        return os.path.isfile(os.path.join(self._job_dir(), "cancel"))
+
+
+def cancel_job(job_id: str) -> bool:
+    """배치 작업을 취소한다."""
+    job_dir = os.path.join(_JOBS_DIR, job_id)
+    if not os.path.isdir(job_dir):
+        return False
+    cancel_path = os.path.join(job_dir, "cancel")
+    with open(cancel_path, "w") as f:
+        f.write("1")
+    return True
+
 
 def get_job(job_id: str) -> BatchJob | None:
     """파일 기반으로 작업 상태를 로드한다."""
@@ -119,10 +135,14 @@ def get_job(job_id: str) -> BatchJob | None:
             error=data.get("error", ""),
             created_at=data.get("created_at", 0),
         )
-        # 완료된 경우 output 바이트 로드
-        output_path = os.path.join(job_dir, "output.xlsx")
-        if os.path.isfile(output_path):
-            with open(output_path, "rb") as f:
+        # 완료된 경우 output 바이트 로드 (ZIP 우선, 없으면 Excel)
+        zip_path = os.path.join(job_dir, "output.zip")
+        xlsx_path = os.path.join(job_dir, "output.xlsx")
+        if os.path.isfile(zip_path):
+            with open(zip_path, "rb") as f:
+                job.output_bytes = f.read()
+        elif os.path.isfile(xlsx_path):
+            with open(xlsx_path, "rb") as f:
                 job.output_bytes = f.read()
         return job
     except (json.JSONDecodeError, OSError, KeyError):
@@ -606,6 +626,9 @@ def start_batch_job_from_parsed(
     land_module,
     apartment_module,
     house_module,
+    building_seoul_module=None,
+    flask_app=None,
+    pdf_name_pattern: str = "{번호}_{소유자}_{주소}",
 ) -> str:
     """이미 파싱된 주소 리스트로 배치 작업을 시작하고 job_id를 반환한다."""
     if not parsed_addresses:
@@ -631,7 +654,9 @@ def start_batch_job_from_parsed(
     t = threading.Thread(
         target=_process_batch,
         args=(job, rows, default_year, vworld_api_key,
-              land_module, apartment_module, house_module),
+              land_module, apartment_module, house_module,
+              building_seoul_module,
+              flask_app, pdf_name_pattern),
         daemon=True,
     )
     t.start()
@@ -639,6 +664,29 @@ def start_batch_job_from_parsed(
 
 
 # ─── 배치 처리 ───
+
+_UNSAFE_FNAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _make_pdf_filename(pattern: str, idx: int, owner: str, address: str,
+                       year: str, share_display: str) -> str:
+    """PDF 파일명을 패턴에 따라 생성한다."""
+    # 주소 축약 (시구동 + 건물명 정도)
+    addr_short = address
+    if len(addr_short) > 40:
+        addr_short = addr_short[:40]
+    name = pattern.replace("{번호}", str(idx))
+    name = name.replace("{소유자}", owner or "")
+    name = name.replace("{주소}", addr_short)
+    name = name.replace("{년도}", year or "")
+    name = name.replace("{지분}", share_display or "")
+    # 파일명 정리
+    name = _UNSAFE_FNAME_RE.sub("", name).strip()
+    name = re.sub(r'_+', '_', name).strip('_')
+    if not name:
+        name = f"{idx}"
+    return name + ".pdf"
+
 
 def _process_batch(
     job: BatchJob,
@@ -648,12 +696,25 @@ def _process_batch(
     land_module,
     apartment_module,
     house_module,
+    building_seoul_module=None,
+    flask_app=None,
+    pdf_name_pattern: str = "{번호}_{소유자}_{주소}",
 ):
-    """백그라운드에서 각 주소를 조회한다."""
+    """백그라운드에서 각 주소를 조회하고 개별 PDF를 생성한다."""
     job.status = "processing"
     job.save_status()
 
-    for entry in rows:
+    pdf_dir = os.path.join(job._job_dir(), "pdfs")
+    os.makedirs(pdf_dir, exist_ok=True)
+    pdf_files = []  # (filename, filepath) 리스트
+
+    for idx, entry in enumerate(rows, 1):
+        # 취소 확인
+        if job.is_cancelled():
+            job.status = "cancelled"
+            job.error = f"사용자에 의해 중지됨 ({job.processed}/{job.total}건 처리 완료)"
+            break
+
         addr_str = entry["address"]
         year = entry["year"] or default_year
         job.current_address = addr_str
@@ -679,8 +740,14 @@ def _process_batch(
             "apt_price_share": "",
             "house_price": "",
             "house_price_share": "",
+            "building_name": "",
+            "building_total": "",
+            "building_total_share": "",
             "status": "",
         }
+
+        # PDF용 섹션 데이터
+        auto_sections = {}
 
         try:
             # 1. 주소 검색 → PNU 추출
@@ -692,6 +759,7 @@ def _process_batch(
                 result_row["status"] = "PNU 추출 실패"
                 job.results.append(result_row)
                 job.processed += 1
+                job.save_status()
                 time.sleep(0.3)
                 continue
 
@@ -711,6 +779,11 @@ def _process_batch(
                         except (ValueError, TypeError):
                             pass
                     found_types.append("토지")
+                    auto_sections["land"] = {
+                        "label": "토지 공시지가",
+                        "result": {"results": land_result.results},
+                        "source_key": "land",
+                    }
             except Exception:
                 pass
             time.sleep(0.5)
@@ -718,6 +791,14 @@ def _process_batch(
             # 3. 공동주택 조회
             try:
                 apt_result = apartment_module.search(address, year)
+                if apt_result.success and apt_result.results:
+                    # 동/호 필터링 적용
+                    dong_no = address.get("dong_no", "")
+                    ho_no = address.get("ho_no", "")
+                    if dong_no or ho_no:
+                        apt_result.results = filter_apartment_by_dong_ho(
+                            apt_result.results, dong_no, ho_no)
+
                 if apt_result.success and apt_result.results:
                     first = apt_result.results[0]
                     result_row["apt_building_name"] = first.get("building_name", "")
@@ -728,6 +809,11 @@ def _process_batch(
                         except (ValueError, TypeError):
                             pass
                     found_types.append("공동주택")
+                    auto_sections["apartment"] = {
+                        "label": "공동주택 공시가격",
+                        "result": {"results": apt_result.results},
+                        "source_key": "apartment",
+                    }
             except Exception:
                 pass
             time.sleep(0.5)
@@ -744,13 +830,74 @@ def _process_batch(
                         except (ValueError, TypeError):
                             pass
                     found_types.append("개별주택")
+                    auto_sections["house"] = {
+                        "label": "개별주택 공시가격",
+                        "result": {"results": house_result.results},
+                        "source_key": "house",
+                    }
             except Exception:
                 pass
+
+            # 5. 주택외건물 조회 (서울 ETAX)
+            sido = address.get("sido", "")
+            if building_seoul_module and sido in ("서울", "서울특별시"):
+                try:
+                    bldg_result = building_seoul_module.search(address, year)
+                    if bldg_result.success and bldg_result.results:
+                        # ETAX는 서버 측 dong/ho 필터링을 하지만, 클라이언트 측 보완 필터링
+                        dong_no = address.get("dong_no", "")
+                        ho_no = address.get("ho_no", "")
+                        if dong_no or ho_no:
+                            bldg_result.results = filter_apartment_by_dong_ho(
+                                bldg_result.results, dong_no, ho_no)
+
+                    if bldg_result.success and bldg_result.results:
+                        first = bldg_result.results[0]
+                        result_row["building_name"] = first.get("name", "")
+                        result_row["building_total"] = first.get("total", "")
+                        if share is not None and first.get("total"):
+                            try:
+                                price_str = re.sub(r'[^\d]', '', str(first["total"]))
+                                if price_str:
+                                    result_row["building_total_share"] = int(int(price_str) * share)
+                            except (ValueError, TypeError):
+                                pass
+                        found_types.append("주택외건물")
+                        auto_sections["building"] = {
+                            "label": "주택외건물 시가표준액 (서울)",
+                            "result": {"results": bldg_result.results},
+                            "source_key": "building_etax",
+                        }
+                except Exception:
+                    pass
+                time.sleep(0.5)
+
+            # 공동주택 또는 건물이 있으면 토지 제거 (auto 검색과 동일 로직)
+            if "apartment" in auto_sections or "building" in auto_sections:
+                auto_sections.pop("land", None)
 
             if found_types:
                 result_row["status"] = ", ".join(found_types)
             else:
                 result_row["status"] = "결과없음"
+
+            # PDF 생성
+            if auto_sections and flask_app:
+                try:
+                    pdf_bytes = _generate_single_pdf(
+                        flask_app, addr_str, year, auto_sections,
+                        owner=owner, share_display=share_display,
+                    )
+                    fname = _make_pdf_filename(
+                        pdf_name_pattern, idx, owner, addr_str,
+                        year, share_display,
+                    )
+                    fpath = os.path.join(pdf_dir, fname)
+                    with open(fpath, "wb") as f:
+                        f.write(pdf_bytes)
+                    pdf_files.append((fname, fpath))
+                except Exception:
+                    pass  # PDF 실패해도 계속 진행
 
         except Exception as e:
             result_row["status"] = f"오류: {e}"
@@ -760,16 +907,64 @@ def _process_batch(
         job.save_status()
         time.sleep(0.3)
 
-    # 결과 엑셀 생성
+    # ZIP 생성 (PDF + 요약 엑셀)
     try:
-        job.output_bytes = _generate_output_excel(job.results)
-        job.status = "completed"
+        excel_bytes = _generate_output_excel(job.results)
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname, fpath in pdf_files:
+                zf.write(fpath, fname)
+            zf.writestr("조회결과_요약.xlsx", excel_bytes)
+        job.output_bytes = zip_buf.getvalue()
+
+        # ZIP 파일을 상태보다 먼저 저장 (race condition 방지:
+        # 브라우저가 cancelled/completed 상태를 보는 시점에 output.zip이 이미 존재해야 함)
+        zip_path = os.path.join(job._job_dir(), "output.zip")
+        with open(zip_path, "wb") as f:
+            f.write(job.output_bytes)
+
+        if job.status != "cancelled":
+            job.status = "completed"
         job.save_status()
-        job.save_output()
     except Exception as e:
         job.status = "error"
-        job.error = f"엑셀 생성 오류: {e}"
+        job.error = f"ZIP 생성 오류: {e}"
         job.save_status()
+
+
+def _generate_single_pdf(flask_app, address: str, year: str,
+                         sections: dict, owner: str = "",
+                         share_display: str = "") -> bytes:
+    """개별 부동산의 조회 결과를 PDF 바이트로 생성한다."""
+    from weasyprint import HTML
+    from .pdf import _safe_url_fetcher
+    from .base import SOURCE_INFO
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # auto_data 구조 생성
+    auto_data = {
+        "address": address,
+        "year": year,
+        "sections": sections,
+        "owner": owner,
+        "share_display": share_display,
+    }
+
+    with flask_app.app_context():
+        from flask import render_template
+        html_string = render_template(
+            "pdf/auto_pdf.html",
+            auto_data=auto_data,
+            now=now,
+            source_info=SOURCE_INFO,
+        )
+
+    pdf_bytes = HTML(
+        string=html_string,
+        url_fetcher=_safe_url_fetcher,
+    ).write_pdf()
+    return pdf_bytes
 
 
 def _resolve_address_for_batch(addr_str: str, vworld_api_key: str) -> dict:
@@ -780,11 +975,18 @@ def _resolve_address_for_batch(addr_str: str, vworld_api_key: str) -> dict:
     if items:
         addr = extract_address_components(items[0])
         addr["_raw"] = addr_str
-        return addr
+    else:
+        # V-World 검색 실패 시 파싱으로 폴백
+        addr = parse_address(addr_str)
+        addr["_raw"] = addr_str
 
-    # V-World 검색 실패 시 파싱으로 폴백
-    addr = parse_address(addr_str)
-    addr["_raw"] = addr_str
+    # parse_address로 dong_no, ho_no 추출하여 병합
+    parsed = parse_address(addr_str)
+    if parsed.get("dong_no") and not addr.get("dong_no"):
+        addr["dong_no"] = parsed["dong_no"]
+    if parsed.get("ho_no") and not addr.get("ho_no"):
+        addr["ho_no"] = parsed["ho_no"]
+
     return addr
 
 
@@ -806,9 +1008,10 @@ def _generate_output_excel(results: list[dict]) -> bytes:
     )
     price_font = Font(bold=True, color="2563EB")
 
-    # 지분/소유자 데이터가 있는지 확인
+    # 지분/소유자/건물 데이터가 있는지 확인
     has_share = any(r.get("share") is not None for r in results)
     has_owner = any(r.get("owner") for r in results)
+    has_building = any(r.get("building_name") or r.get("building_total") for r in results)
 
     # 소유자가 있으면 소유자별 정렬
     if has_owner:
@@ -835,6 +1038,10 @@ def _generate_output_excel(results: list[dict]) -> bytes:
     ]
     if has_share:
         headers.append("개별주택_지분적용(원)")
+    if has_building:
+        headers += ["주택외건물_소재지", "주택외건물_시가표준액(원)"]
+        if has_share:
+            headers.append("주택외건물_지분적용(원)")
     headers.append("조회상태")
 
     for col_idx, header in enumerate(headers, 1):
@@ -876,6 +1083,13 @@ def _generate_output_excel(results: list[dict]) -> bytes:
         ]
         if has_share:
             values.append(_to_number(row_data.get("house_price_share", "")))
+        if has_building:
+            values += [
+                row_data.get("building_name", ""),
+                _to_number(row_data.get("building_total", "")),
+            ]
+            if has_share:
+                values.append(_to_number(row_data.get("building_total_share", "")))
         values.append(row_data.get("status", ""))
 
         for col_idx, val in enumerate(values, 1):
@@ -891,7 +1105,8 @@ def _generate_output_excel(results: list[dict]) -> bytes:
                 cell.fill = share_fill
                 cell.number_format = "#,##0"
             elif header_name in ("토지_공시지가(원/m²)", "토지_총액(원)",
-                                 "공동주택_공시가격(원)", "개별주택_공시가격(원)") and val:
+                                 "공동주택_공시가격(원)", "개별주택_공시가격(원)",
+                                 "주택외건물_시가표준액(원)") and val:
                 cell.font = price_font
                 cell.number_format = "#,##0"
 
@@ -909,7 +1124,7 @@ def _generate_output_excel(results: list[dict]) -> bytes:
             ws.column_dimensions[col_letter].width = 15
         elif h in ("기준년도", "지분"):
             ws.column_dimensions[col_letter].width = 10
-        elif "건물명" in h:
+        elif "건물명" in h or "소재지" in h:
             ws.column_dimensions[col_letter].width = 20
         elif "면적" in h:
             ws.column_dimensions[col_letter].width = 12

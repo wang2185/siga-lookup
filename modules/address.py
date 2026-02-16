@@ -5,6 +5,17 @@ import requests
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
+# 한글 → 영문 알파벳 매핑 (공동주택 동명 변환용)
+_KOREAN_TO_ALPHA = {
+    '에이': 'A', '비': 'B', '씨': 'C', '디': 'D',
+    '이': 'E', '에프': 'F', '지': 'G', '에이치': 'H',
+    '아이': 'I', '제이': 'J', '케이': 'K', '엘': 'L',
+    '엠': 'M', '엔': 'N', '오': 'O', '피': 'P',
+    '큐': 'Q', '알': 'R', '아르': 'R', '에스': 'S',
+    '티': 'T', '유': 'U', '브이': 'V', '더블유': 'W',
+    '엑스': 'X', '와이': 'Y', '제트': 'Z',
+}
+
 
 SIDO_MAP = {
     "서울": "서울", "부산": "부산", "대구": "대구", "인천": "인천",
@@ -30,7 +41,7 @@ def parse_address(addr_str: str) -> dict:
     result = {
         "sido": "", "sigungu": "", "dong": "",
         "bonji": "", "bunji": "", "bldg_name": "",
-        "dong_no": "", "ho_no": "", "san": False,
+        "dong_no": "", "ho_no": "", "floor": "", "san": False,
     }
     tokens = addr_str.strip().split()
     remaining = []
@@ -49,25 +60,125 @@ def parse_address(addr_str: str) -> dict:
         if token == "산":
             result["san"] = True
             continue
+        # 번지 with suffix (64번지, 494-15번지)
+        if not result["bonji"] and re.match(r"^\d+(-\d+)?번지$", token):
+            cleaned = token[:-2]  # strip 번지
+            parts = cleaned.split("-")
+            result["bonji"] = parts[0]
+            if len(parts) > 1:
+                result["bunji"] = parts[1]
+            continue
         if not result["bonji"] and re.match(r"^\d+(-\d+)?$", token):
             parts = token.split("-")
             result["bonji"] = parts[0]
             if len(parts) > 1:
                 result["bunji"] = parts[1]
             continue
-        m = re.match(r"^([A-Za-z\d]+)동$", token)
+        # bonji가 이미 있을 때 NNN-NNNN → dong_no/ho_no (703-406 등)
+        if (result["bonji"] and not result["dong_no"] and not result["ho_no"]
+                and re.match(r"^\d+-\d+$", token)):
+            parts = token.split("-")
+            result["dong_no"] = parts[0]
+            result["ho_no"] = parts[1]
+            continue
+        # 한글동숫자호 결합 (에프동2218호)
+        m = re.match(r"^제?([가-힣]{1,4})동(\d+)호$", token)
+        if m:
+            result["dong_no"] = m.group(1)
+            result["ho_no"] = m.group(2)
+            continue
+        m = re.match(r"^제?([가-힣A-Za-z\d]+)동$", token)
         if m:
             result["dong_no"] = m.group(1)
             continue
-        m = re.match(r"^(\d+)호$", token)
+        # 한글+숫자+호 (씨3401호, 에이2007호, 비106호)
+        m = re.match(r"^제?([가-힣]{1,4})(\d+)호$", token)
+        if m:
+            if not result["dong_no"]:
+                result["dong_no"] = m.group(1)
+            result["ho_no"] = m.group(2)
+            continue
+        m = re.match(r"^제?(\d+(?:-\d+)?)호$", token)
         if m:
             result["ho_no"] = m.group(1)
+            continue
+        # 한글-숫자 (에이-502, 나-103)
+        m = re.match(r"^([가-힣]{1,4})-(\d+)$", token)
+        if m:
+            result["dong_no"] = m.group(1)
+            result["ho_no"] = m.group(2)
+            continue
+        m = re.match(r"^제?(\w+)층$", token)
+        if m and not result["floor"]:
+            result["floor"] = m.group(1)
             continue
         remaining.append(token)
 
     if remaining:
         result["bldg_name"] = " ".join(remaining)
+
+    # "N-N호" 패턴에서 dong_no가 비어있으면 자동 분리 (제1-2108호 → dong=1, ho=2108)
+    if not result["dong_no"] and result["ho_no"] and "-" in result["ho_no"]:
+        parts = result["ho_no"].split("-", 1)
+        result["dong_no"] = parts[0]
+        result["ho_no"] = parts[1]
+
+    # dong_no가 dong과 동일하면 클리어 (중복 행정동명: "개포동 ... 개포동 개포자이")
+    if result["dong_no"] and result["dong"] and result["dong_no"] == result["dong"]:
+        result["dong_no"] = ""
+
     return result
+
+
+def normalize_dong_ho(val: str) -> str:
+    """동/호 값을 비교용으로 정규화한다.
+
+    '101동' → '101', '301호' → '301', '제101동' → '101',
+    '씨동' → 'C', '에이동' → 'A'.
+    """
+    val = str(val).strip()
+    val = re.sub(r'[동호]$', '', val).strip()
+    val = re.sub(r'^제', '', val).strip()
+    # 한글 → 영문 변환
+    mapped = _KOREAN_TO_ALPHA.get(val)
+    if mapped:
+        return mapped
+    return val.upper()
+
+
+def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list:
+    """공동주택/건물 결과를 동/호로 단계적 필터링한다.
+
+    1단계: 동으로 필터 (있으면)
+    2단계: 호로 추가 필터
+    동이 없으면 호만으로 필터링 시도.
+    각 단계에서 필터 결과가 없으면 이전 결과를 유지한다.
+
+    결과 dict의 동 필드명은 'dong' (공동주택) 또는 'dong_no' (ETAX 건물) 모두 지원.
+    호 필드명은 'ho' (공통).
+    """
+    if not dong_no and not ho_no:
+        return results
+
+    current = results
+
+    if dong_no:
+        norm_dong = normalize_dong_ho(dong_no)
+        dong_filtered = [
+            r for r in current
+            if normalize_dong_ho(r.get("dong", "") or r.get("dong_no", "")) == norm_dong
+        ]
+        if dong_filtered:
+            current = dong_filtered
+
+    if ho_no:
+        norm_ho = normalize_dong_ho(ho_no)
+        ho_filtered = [r for r in current
+                       if normalize_dong_ho(r.get("ho", "")) == norm_ho]
+        if ho_filtered:
+            current = ho_filtered
+
+    return current
 
 
 def search_vworld(keyword: str, api_key: str, page: int = 1, count: int = 10) -> dict:

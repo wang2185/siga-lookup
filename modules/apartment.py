@@ -50,28 +50,38 @@ class ApartmentPriceModule(BaseLookupModule):
         stdr_year = year or str(datetime.now().year - 1)
 
         try:
-            params = {
-                "key": self.api_key,
-                "pnu": search_pnu,
-                "stdrYear": stdr_year,
-                "format": "json",
-                "numOfRows": 1000,
-                "pageNo": 1,
-            }
-            resp = requests.get(API_URL, params=params, timeout=15)
-            data = resp.json()
+            all_items = []
+            page = 1
+            max_pages = 5  # 최대 5000건
+            while page <= max_pages:
+                params = {
+                    "key": self.api_key,
+                    "pnu": search_pnu,
+                    "stdrYear": stdr_year,
+                    "format": "json",
+                    "numOfRows": 1000,
+                    "pageNo": page,
+                }
+                resp = requests.get(API_URL, params=params, timeout=15)
+                data = resp.json()
 
-            # V-World NED API 응답 구조 호환 처리
-            container = data.get("apartHousingPrices", {})
-            if not container and "response" in data:
-                container_fields = data["response"].get("fields", {})
-                container = {"field": container_fields.get("apartHousingPrices", [])}
-            items = container.get("field", [])
-            if not isinstance(items, list):
-                items = [items] if items else []
+                container = data.get("apartHousingPrices", {})
+                if not container and "response" in data:
+                    container_fields = data["response"].get("fields", {})
+                    container = {"field": container_fields.get("apartHousingPrices", [])}
+                items = container.get("field", [])
+                if not isinstance(items, list):
+                    items = [items] if items else []
+
+                if not items:
+                    break
+                all_items.extend(items)
+                if len(items) < 1000:
+                    break
+                page += 1
 
             results = []
-            for item in items:
+            for item in all_items:
                 results.append({
                     "year": item.get("stdrYear", ""),
                     "building_name": item.get("aphusNm", "") or item.get("complexNm", ""),

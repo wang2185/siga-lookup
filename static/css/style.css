@@ -333,6 +333,46 @@ input[type="text"]:focus, select:focus {
   100% { margin-left: 70%; width: 30%; }
 }
 
+/* 버튼 클릭 선택 (btn-select-group) */
+.btn-select-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.btn-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-select:hover {
+  border-color: var(--primary);
+  background: #eff6ff;
+}
+
+.btn-select.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn-select.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .pdf-filename-input {
   font-family: inherit;
 }

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}엑셀 일괄 조회{% endblock %}
+{% block title %}일괄 조회{% endblock %}
 
 {% block content %}
 <div class="card">
   <div class="result-header">
-    <h1>엑셀 일괄 조회</h1>
-    <p style="color:var(--text-secondary);margin-top:4px;">여러 주소를 한번에 조회하여 결과를 엑셀로 다운로드</p>
+    <h1>일괄 조회</h1>
+    <p style="color:var(--text-secondary);margin-top:4px;">여러 주소를 한번에 조회하여 부동산별 PDF로 다운로드</p>
   </div>
 
   <!-- Step 1: 파일 업로드 -->
@@ -43,41 +43,40 @@
     <div id="uploadSummary" class="alert alert-info" style="margin-bottom:16px;"></div>
 
     <div class="form-group">
-      <label class="form-label" for="addressCol">주소 컬럼 (필수)</label>
-      <select id="addressCol" class="form-select"></select>
+      <label class="form-label">주소 컬럼 (필수)</label>
+      <div class="btn-select-group" id="addressColGroup"></div>
+      <input type="hidden" id="addressCol" value="">
     </div>
 
     <div class="form-group">
-      <label class="form-label" for="yearCol">기준년도 컬럼 (선택)</label>
-      <select id="yearCol" class="form-select">
-        <option value="">-- 사용 안함 --</option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label" for="ownerCol">소유자 컬럼 (선택)</label>
-      <select id="ownerCol" class="form-select">
-        <option value="">-- 사용 안함 --</option>
-      </select>
+      <label class="form-label">소유자 컬럼 (선택)</label>
+      <div class="btn-select-group" id="ownerColGroup"></div>
+      <input type="hidden" id="ownerCol" value="">
       <p style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">소유자별로 분류하여 표시합니다. 병합된 셀도 자동 인식됩니다.</p>
     </div>
 
     <div class="form-group">
-      <label class="form-label" for="shareCol">지분 컬럼 (선택)</label>
-      <select id="shareCol" class="form-select">
-        <option value="">-- 사용 안함 --</option>
-      </select>
-      <p style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">지분 비율 (예: 1/2, 50%, 0.5 등). 지분이 있으면 적용된 가격도 함께 표시됩니다.</p>
+      <label class="form-label">지분 컬럼 (선택)</label>
+      <div class="btn-select-group" id="shareColGroup"></div>
+      <input type="hidden" id="shareCol" value="">
+      <p style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">주소에 (지분:1/2) 형태로 포함된 경우 자동 인식됩니다.</p>
     </div>
 
     <div class="form-group">
-      <label class="form-label" for="defaultYear">기본 기준년도 (컬럼 없을 때 적용)</label>
-      <select id="defaultYear" class="form-select" style="max-width:200px;">
-        <option value="">전체</option>
+      <label class="form-label">기준년도 컬럼 (선택)</label>
+      <div class="btn-select-group" id="yearColGroup"></div>
+      <input type="hidden" id="yearCol" value="">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">기본 기준년도 (컬럼 없을 때 적용)</label>
+      <div class="btn-select-group" id="defaultYearGroup">
+        <button type="button" class="btn-select" data-value="">전체</button>
         {% for y in years %}
-        <option value="{{ y }}" {% if y == 2025 %}selected{% endif %}>{{ y }}</option>
+        <button type="button" class="btn-select{% if y == 2025 %} active{% endif %}" data-value="{{ y }}">{{ y }}</button>
         {% endfor %}
-      </select>
+      </div>
+      <input type="hidden" id="defaultYear" value="2025">
     </div>
 
     <div id="previewTableWrapper" class="batch-preview-wrapper" style="display:none;">
@@ -96,11 +95,18 @@
 
   <!-- Step 3: 주소 분석 결과 확인 -->
   <div id="step3-preview" style="display:none;">
-    <p class="batch-step-desc">Step 3. 분석된 주소를 확인하세요.</p>
+    <p class="batch-step-desc">Step 3. 분석된 주소를 확인하고 PDF 파일명 규칙을 설정하세요.</p>
 
     <div id="splitBanner" class="alert alert-info" style="display:none;"></div>
 
     <p id="addressCountInfo" class="batch-address-count"></p>
+
+    <!-- 상단 액션 버튼 -->
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+      <button type="button" id="backToStep2Top" class="btn btn-secondary">뒤로</button>
+      <a id="downloadCleanedLinkTop" href="#" class="btn btn-download" style="flex:1;text-align:center;">정리된 주소 다운로드</a>
+      <button type="button" id="startBatchBtnTop" class="btn btn-primary" style="flex:1;">일괄 조회 시작</button>
+    </div>
 
     <div class="batch-preview-wrapper">
       <table class="result-table" id="addressTable">
@@ -115,6 +121,15 @@
         </thead>
         <tbody id="addressTableBody"></tbody>
       </table>
+    </div>
+
+    <div class="form-group" style="margin-top:16px;">
+      <label class="form-label">PDF 파일명 규칙</label>
+      <input type="text" id="pdfNamePattern" class="pdf-filename-input" value="{번호}_{소유자}_{주소}" style="width:100%;">
+      <p style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">
+        사용 가능 변수: <code>{번호}</code> <code>{소유자}</code> <code>{주소}</code> <code>{년도}</code> <code>{지분}</code>
+      </p>
+      <p id="pdfNamePreview" style="font-size:0.8rem;color:var(--primary);margin-top:4px;"></p>
     </div>
 
     <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;">
@@ -138,15 +153,18 @@
       <div class="batch-progress-fill" id="progressFill" style="width:0%"></div>
     </div>
     <p id="currentAddress" class="batch-current-address"></p>
+    <button type="button" id="cancelBtn" class="btn btn-secondary" style="width:100%;margin-top:12px;">
+      조회 중지
+    </button>
   </div>
 
   <!-- 완료 -->
   <div id="completeSection" style="display:none;margin-top:24px;">
-    <div class="alert alert-success">
+    <div class="alert alert-success" id="completeMessage">
       <strong>조회 완료!</strong> 아래 버튼을 클릭하여 결과를 다운로드하세요.
     </div>
     <a id="downloadLink" href="#" class="btn btn-download" style="width:100%;text-align:center;">
-      결과 엑셀 다운로드
+      결과 PDF 다운로드 (ZIP)
     </a>
   </div>
 
@@ -162,5 +180,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/batch.js') }}?v=20260216"></script>
+<script src="{{ url_for('static', filename='js/batch.js') }}?v=20260217b"></script>
 {% endblock %}
