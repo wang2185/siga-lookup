@@ -214,7 +214,7 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
                 if result.success and result.results:
                     items = result.results
                     if type_key == "apartment" and (dong_no or ho_no):
-                        items = _filter_apartment_by_dong_ho(items, dong_no, ho_no)
+                        items = filter_apartment_by_dong_ho(items, dong_no, ho_no)
                     auto_results[type_key] = {
                         "label": label,
                         "results": items,
@@ -281,7 +281,7 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
 
     if property_type == "apartment" and result.success and result.results:
         if dong_no or ho_no:
-            result.results = _filter_apartment_by_dong_ho(
+            result.results = filter_apartment_by_dong_ho(
                 result.results, dong_no, ho_no)
 
     return {
