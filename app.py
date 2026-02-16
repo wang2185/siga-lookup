@@ -7,7 +7,10 @@ from flask import Flask, render_template, request, jsonify, session, send_file
 
 from config import Config
 from modules.base import PROPERTY_TYPES, LookupResult, SOURCE_INFO
-from modules.address import parse_address, search_juso, search_vworld, extract_address_components, SIDO_MAP
+from modules.address import (
+    parse_address, search_juso, search_vworld, extract_address_components,
+    SIDO_MAP, normalize_dong_ho, filter_apartment_by_dong_ho,
+)
 from modules.building_nonseoul import WeTaxModule
 from modules.building_seoul import (
     SeoulETaxModule, get_dong_cache, ETAX_SIGU, ETAX_TSJ,
@@ -20,7 +23,7 @@ from modules.commercial import CommercialPriceModule
 from modules.cache import LookupCache
 from modules.pdf import generate_pdf_response
 from modules.batch import (
-    get_job, generate_sample_template, MAX_FILE_SIZE,
+    get_job, cancel_job, generate_sample_template, MAX_FILE_SIZE,
     preview_excel, store_upload, get_upload,
     parse_addresses_from_excel, generate_cleaned_excel,
     start_batch_job_from_parsed, _save_parsed,
@@ -133,6 +136,112 @@ def _get_module(property_type: str, address: dict):
     return MODULES.get(property_type)
 
 
+def perform_search(address_str: str, property_type: str = "", year: str = "",
+                   dong_no: str = "", ho_no: str = "") -> dict:
+    """Core search logic for JSON API.
+
+    Returns a plain dict suitable for JSON serialization.
+    """
+    addr = parse_address(address_str)
+    addr["_raw"] = address_str
+
+    # Auto mode (유형 미선택)
+    if property_type not in PROPERTY_TYPES:
+        auto_results = {}
+
+        for type_key, mod, label in [
+            ("land", land_module, "토지 개별공시지가"),
+            ("apartment", apartment_module, "공동주택 공시가격"),
+            ("house", house_module, "개별주택 공시가격"),
+        ]:
+            try:
+                result = mod.search(addr, year)
+                if result.success and result.results:
+                    items = result.results
+                    if type_key == "apartment" and (dong_no or ho_no):
+                        items = _filter_apartment_by_dong_ho(items, dong_no, ho_no)
+                    auto_results[type_key] = {
+                        "label": label,
+                        "results": items,
+                        "source": result.source,
+                        "property_type": result.property_type,
+                    }
+            except Exception as exc:
+                app.logger.error("[API-AUTO] %s exception: %s", type_key, exc)
+
+        # 서울 건물
+        sido = addr.get("sido", "")
+        if sido in ("서울", "서울특별시"):
+            try:
+                kw = {"dong_no": dong_no, "ho_no": ho_no}
+                result = etax_module.search(addr, year, **kw)
+                if result.success and result.results:
+                    auto_results["building"] = {
+                        "label": "주택외건물 시가표준액 (서울)",
+                        "results": result.results,
+                        "source": result.source,
+                        "property_type": result.property_type,
+                    }
+            except Exception:
+                pass
+
+        if "apartment" in auto_results or "building" in auto_results:
+            auto_results.pop("land", None)
+
+        all_results = []
+        for type_key, info in auto_results.items():
+            for item in info["results"]:
+                item["_property_type"] = type_key
+                item["_property_label"] = info["label"]
+                item["_source"] = info.get("source", "")
+                all_results.append(item)
+
+        return {
+            "success": len(all_results) > 0,
+            "property_type": "auto",
+            "address": address_str,
+            "year": year,
+            "results": all_results,
+            "error": None if all_results else "조회 결과가 없습니다.",
+        }
+
+    # Specific type
+    mod = _get_module(property_type, addr)
+    if mod is None:
+        return {
+            "success": False,
+            "property_type": property_type,
+            "address": address_str,
+            "year": year,
+            "results": [],
+            "error": "지원하지 않는 조회 유형입니다.",
+        }
+
+    kw = {}
+    if isinstance(mod, SeoulETaxModule):
+        kw["dong_no"] = dong_no
+        kw["ho_no"] = ho_no
+
+    result = mod.search(addr, year, **kw)
+
+    if property_type == "apartment" and result.success and result.results:
+        if dong_no or ho_no:
+            result.results = _filter_apartment_by_dong_ho(
+                result.results, dong_no, ho_no)
+
+    return {
+        "success": result.success,
+        "property_type": result.property_type,
+        "property_type_label": result.property_type_label,
+        "address": result.address,
+        "year": result.year,
+        "results": result.results,
+        "source": result.source,
+        "error": result.error,
+        "message": result.message,
+    }
+
+
 # ─── 메인 라우트 ───
 
 @app.route("/")
@@ -161,6 +270,15 @@ def search():
         address = _resolve_address(request.form)
         dong_no = request.form.get("dong_no", "").strip()
         ho_no = request.form.get("ho_no", "").strip()
+        # address dict에서도 dong/ho 추출 (주소에서 파싱된 경우 보완)
+        if not dong_no:
+            dong_no = address.get("dong_no", "").strip()
+        if not ho_no:
+            ho_no = address.get("ho_no", "").strip()
+        app.logger.info(
+            "[AUTO] addr=%s pnu=%s dong_no=%r ho_no=%r year=%s",
+            address.get("_raw", ""), address.get("pnu", ""), dong_no, ho_no, year,
+        )
         auto_results = {}
 
         for type_key, module, label in [
@@ -170,23 +288,25 @@ def search():
         ]:
             try:
                 result = module.search(address, year)
+                app.logger.info(
+                    "[AUTO] %s: success=%s count=%d err=%s",
+                    type_key, result.success, len(result.results), result.error,
+                )
                 if result.success and result.results:
-                    # 공동주택: 동/호 필터링 (정확 일치)
+                    # 공동주택: 동/호 필터링 (단계적 — 동 → 호)
                     if type_key == "apartment" and (dong_no or ho_no):
-                        filtered = result.results
-                        if dong_no:
-                            filtered = [r for r in filtered if str(r.get("dong", "")).strip() == dong_no]
-                        if ho_no:
-                            filtered = [r for r in filtered if str(r.get("ho", "")).strip() == ho_no]
-                        result.results = filtered
-                        if not filtered:
-                            continue
+                        result.results = filter_apartment_by_dong_ho(
+                            result.results, dong_no, ho_no)
+                        app.logger.info(
+                            "[AUTO] apartment filter: dong=%r ho=%r -> %d results",
+                            dong_no, ho_no, len(result.results),
+                        )
                     auto_results[type_key] = {
                         "label": label,
                         "result": result,
                     }
-            except Exception:
-                pass
+            except Exception as exc:
+                app.logger.error("[AUTO] %s exception: %s", type_key, exc)
 
         # 서울 주소이면 ETAX 주택외건물도 조회
         sido = address.get("sido", "")
@@ -289,6 +409,22 @@ def search():
     # 검색 실행
     result = module.search(address, year, **kwargs)
 
+    # 공동주택: 동/호 필터링 (단계적 — 동 → 호)
+    if property_type == "apartment" and result.success and result.results:
+        dong_no = request.form.get("dong_no", "").strip()
+        ho_no = request.form.get("ho_no", "").strip()
+        if not dong_no:
+            dong_no = address.get("dong_no", "").strip()
+        if not ho_no:
+            ho_no = address.get("ho_no", "").strip()
+        app.logger.info(
+            "[DIRECT APT] dong_no=%r ho_no=%r total=%d",
+            dong_no, ho_no, len(result.results),
+        )
+        if dong_no or ho_no:
+            result.results = filter_apartment_by_dong_ho(
+                result.results, dong_no, ho_no)
+
     # 캐시 저장 (성공 시)
     if result.success and result.results:
         lookup_cache.set(property_type, address, year, result)
@@ -333,6 +469,33 @@ def api_address_search():
     if not result.get("items") and Config.JUSO_API_KEY:
         result = search_juso(keyword, Config.JUSO_API_KEY)
     return jsonify(result)
+
+
+# ─── JSON 시가조회 API (WillSave 연동용) ───
+
+@app.route("/api/search", methods=["POST"])
+def api_search():
+    """JSON API for property price lookup (for WillSave integration)."""
+    data = request.get_json(silent=True) or request.form
+    address = (data.get("address") or "").strip()
+    if not address:
+        return jsonify({"success": False, "error": "주소를 입력해주세요.", "results": []}), 400
+
+    property_type = (data.get("property_type") or "").strip()
+    year = (data.get("year") or "").strip()
+    dong_no = (data.get("dong_no") or "").strip()
+    ho_no = (data.get("ho_no") or "").strip()
+
+    # year 검증
+    if year and (not year.isdigit() or not (2010 <= int(year) <= 2030)):
+        return jsonify({"success": False, "error": "유효하지 않은 기준년도입니다.", "results": []}), 400
+
+    try:
+        result = perform_search(address, property_type, year, dong_no, ho_no)
+        return jsonify(result)
+    except Exception as exc:
+        app.logger.error("[API] search error: %s", exc)
+        return jsonify({"success": False, "error": f"조회 중 오류가 발생했습니다: {exc}", "results": []}), 500
 
 
 # ─── ETAX 호환 라우트 (하위 호환) ───
@@ -511,6 +674,8 @@ def batch_start():
     if not cache or not cache.parsed_addresses:
         return jsonify({"error": "파싱 결과가 없습니다. 다시 진행해주세요."}), 404
 
+    pdf_name_pattern = data.get("pdf_name_pattern", "{번호}_{소유자}_{주소}")
+
     try:
         job_id = start_batch_job_from_parsed(
             parsed_addresses=cache.parsed_addresses,
@@ -519,12 +684,23 @@ def batch_start():
             land_module=land_module,
             apartment_module=apartment_module,
             house_module=house_module,
+            building_seoul_module=etax_module,
+            flask_app=app,
+            pdf_name_pattern=pdf_name_pattern,
         )
         return jsonify({"job_id": job_id})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"처리 오류: {e}"}), 500
+
+
+@app.route("/batch/cancel/<job_id>", methods=["POST"])
+def batch_cancel(job_id):
+    """배치 작업을 취소한다."""
+    if cancel_job(job_id):
+        return jsonify({"ok": True})
+    return jsonify({"error": "작업을 찾을 수 없습니다."}), 404
 
 
 @app.route("/batch/download-cleaned/<upload_id>")
@@ -549,27 +725,31 @@ def batch_status(job_id):
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "작업을 찾을 수 없습니다."}), 404
-    return jsonify({
+    resp = {
         "status": job.status,
         "total": job.total,
         "processed": job.processed,
         "current_address": job.current_address,
         "error": job.error,
-    })
+    }
+    # cancelled 상태에서도 다운로드 가능하도록
+    if job.status == "cancelled" and job.output_bytes:
+        resp["has_output"] = True
+    return jsonify(resp)
 
 
 @app.route("/batch/download/<job_id>")
 def batch_download(job_id):
-    import io
+    import io as _io
     job = get_job(job_id)
-    if not job or job.status != "completed" or not job.output_bytes:
+    if not job or job.status not in ("completed", "cancelled") or not job.output_bytes:
         return "결과를 찾을 수 없습니다.", 404
 
     return send_file(
-        io.BytesIO(job.output_bytes),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        _io.BytesIO(job.output_bytes),
+        mimetype="application/zip",
         as_attachment=True,
-        download_name=f"일괄조회결과_{job_id}.xlsx",
+        download_name=f"일괄조회결과_{job_id}.zip",
     )
 
 
