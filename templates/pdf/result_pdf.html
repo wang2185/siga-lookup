@@ -75,14 +75,9 @@
 
   {% if source_info %}
   <div class="info-box" style="margin-top:8px;">
-    <p style="font-weight:700;font-size:10pt;margin-bottom:6px;color:#1e293b;">데이터 출처 및 근거</p>
-    <dl>
-      <dt>담당기관: </dt><dd>{{ source_info.authority }}</dd><br>
-      <dt>제공기관: </dt><dd>{{ source_info.provider }}</dd><br>
-      <dt>조회시스템: </dt><dd>{{ source_info.system }}</dd><br>
-      <dt>근거법령: </dt><dd>{{ source_info.law }}</dd><br>
-      <dt>공식사이트: </dt><dd>{{ source_info.url }}</dd>
-    </dl>
+    <p style="font-weight:700;font-size:10pt;margin-bottom:4px;color:#1e293b;">데이터 출처</p>
+    <p style="margin-bottom:2px;">{{ source_info.authority }} · {{ source_info.provider }} 제공 — {{ source_info.system }}</p>
+    <p style="font-size:9pt;color:#64748b;">{{ source_info.law }} · {{ source_info.url }}</p>
   </div>
   {% endif %}
 

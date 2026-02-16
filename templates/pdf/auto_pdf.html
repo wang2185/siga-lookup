@@ -99,11 +99,10 @@
   <div class="section-title">{{ section.label }}</div>
 
   {% if source_info and src_key in source_info %}
+  {% set src = source_info[src_key] %}
   <div class="source-box">
-    <strong>담당기관:</strong> {{ source_info[src_key].authority }} |
-    <strong>조회시스템:</strong> {{ source_info[src_key].system }}<br>
-    <strong>근거법령:</strong> {{ source_info[src_key].law }} |
-    <strong>공식사이트:</strong> {{ source_info[src_key].url }}
+    {{ src.authority }} · {{ src.provider }} 제공 — {{ src.system }}<br>
+    <span style="color:#3b82f6;">{{ src.law }}</span> · {{ src.url }}
   </div>
   {% endif %}
 
