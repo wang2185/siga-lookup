@@ -40,6 +40,8 @@ class WeTaxModule(BaseLookupModule):
             error=result.get("error"),
             message=result.get("message"),
             logs=result.get("logs", []),
+            evidence=result.get("evidence"),
+            evidence_type="png" if result.get("evidence") else "",
         )
 
     def _run_search(self, addr: dict, building_type: str = "existing") -> dict:
@@ -82,10 +84,16 @@ class WeTaxModule(BaseLookupModule):
                 logs.append("시/도 선택 실패")
             time.sleep(2)
 
-            # 시/군/구
-            logs.append(f"시/군/구 선택: {addr.get('sigungu', '')}")
-            if not _wait_and_select(driver, "selLgvCd", addr.get("sigungu", "")):
-                logs.append("시/군/구 선택 실패")
+            # 시/군/구 — 하위 구가 있으면 우선 사용 (고양시 일산동구 등)
+            sigungu_kw = addr.get("sigungu_sub", "") or addr.get("sigungu", "")
+            logs.append(f"시/군/구 선택: {sigungu_kw}")
+            if not _wait_and_select(driver, "selLgvCd", sigungu_kw):
+                # 하위 구로 실패 시 상위 시군으로 재시도
+                if addr.get("sigungu_sub") and addr.get("sigungu"):
+                    logs.append(f"시/군/구 재시도: {addr['sigungu']}")
+                    _wait_and_select(driver, "selLgvCd", addr["sigungu"])
+                else:
+                    logs.append("시/군/구 선택 실패")
             time.sleep(2)
 
             # 읍/면/동
@@ -127,32 +135,22 @@ class WeTaxModule(BaseLookupModule):
                         break
 
             # 동/호
-            _fill_dong_ho(driver, addr.get("dong_no", ""), addr.get("ho_no", ""))
+            dong_no = addr.get("dong_no", "")
+            ho_no = addr.get("ho_no", "")
+            _fill_dong_ho(driver, dong_no, ho_no)
             time.sleep(0.5)
 
-            # 검색 클릭
-            logs.append("검색 실행")
-            try:
-                btn = driver.find_element(By.ID, "btnSrchBldsCpb")
-                driver.execute_script("arguments[0].click();", btn)
-            except NoSuchElementException:
-                for btn in driver.find_elements(By.TAG_NAME, "button"):
-                    if "조회" in btn.text or "검색" in btn.text:
-                        driver.execute_script("arguments[0].click();", btn)
-                        break
+            # 검색 실행 및 결과 수집
+            results, evidence = _click_search_and_extract(driver, logs)
 
-            time.sleep(5)
-
-            # alert 처리
-            try:
-                alert = driver.switch_to.alert
-                alert.accept()
-            except Exception:
-                pass
-
-            # 결과 수집
-            results = _extract_all_results(driver)
-            logs.append(f"결과 {len(results)}건 수집")
+            # 재시도: 호만 입력했는데 결과 없으면 동=1로 재시도
+            if not results and ho_no and not dong_no:
+                body_text = driver.find_element(By.TAG_NAME, "body").text
+                if "존재하지 않습니다" in body_text or "호를 입력" in body_text:
+                    logs.append("동 미입력 → 동=1로 재시도")
+                    _fill_dong_ho(driver, "1", ho_no)
+                    time.sleep(0.5)
+                    results, evidence = _click_search_and_extract(driver, logs)
 
             message = None
             if not results:
@@ -166,7 +164,8 @@ class WeTaxModule(BaseLookupModule):
                 else:
                     message = "결과를 자동 파싱하지 못했습니다."
 
-            return {"success": True, "results": results, "message": message, "logs": logs}
+            return {"success": True, "results": results, "message": message,
+                    "logs": logs, "evidence": evidence}
 
         except Exception as e:
             return {
@@ -334,9 +333,42 @@ def _fill_dong_ho(driver, dong_no, ho_no):
                     break
 
 
+def _click_search_and_extract(driver, logs):
+    """검색 버튼 클릭 → alert 처리 → 결과 추출 → 스크린샷 캡처."""
+    logs.append("검색 실행")
+    try:
+        btn = driver.find_element(By.ID, "btnSrchBldsCpb")
+        driver.execute_script("arguments[0].click();", btn)
+    except NoSuchElementException:
+        for btn in driver.find_elements(By.TAG_NAME, "button"):
+            if "조회" in btn.text or "검색" in btn.text:
+                driver.execute_script("arguments[0].click();", btn)
+                break
+
+    time.sleep(5)
+
+    try:
+        alert = driver.switch_to.alert
+        alert.accept()
+    except Exception:
+        pass
+
+    results = _extract_all_results(driver)
+    logs.append(f"결과 {len(results)}건 수집")
+
+    evidence = None
+    try:
+        evidence = driver.get_screenshot_as_png()
+        logs.append("스크린샷 캡처 완료")
+    except Exception:
+        pass
+
+    return results, evidence
+
+
 def _extract_all_results(driver):
     results = []
-    for tid in ["tb_BldsCpbInq", "tb_hos", "tb_mfh"]:
+    for tid in ["tb_BldsCpbInq", "tb_BldsCpbInqTmp", "tb_hos", "tb_mfh"]:
         try:
             table = driver.find_element(By.ID, tid)
             if not table.is_displayed():

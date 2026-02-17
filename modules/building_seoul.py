@@ -1,5 +1,6 @@
 """주택외건물 서울 지역 시가표준액 조회 — Seoul ETAX (HTTP POST)."""
 
+import html as _html
 import re
 import ssl
 
@@ -118,9 +119,13 @@ class SeoulETaxModule(BaseLookupModule):
             )
 
         try:
-            results = etax_search(
+            results, _raw_html = etax_search(
                 sigu_code, hdong_code, bonbun, bubun, tsj_gubun, year, dong, hosu
             )
+            evidence = None
+            if results:
+                evidence = _build_evidence_pdf(
+                    results, address.get("_raw", ""), year)
             return LookupResult(
                 success=True,
                 property_type=self.property_type,
@@ -129,6 +134,8 @@ class SeoulETaxModule(BaseLookupModule):
                 year=year or "전체",
                 results=results,
                 source=self.source_name,
+                evidence=evidence,
+                evidence_type="pdf" if evidence else "",
             )
         except Exception as e:
             return LookupResult(
@@ -191,7 +198,10 @@ def get_dong_cache() -> dict:
 
 def etax_search(sigu_code, hdong_code, bonbun, bubun="",
                 tsj_gubun="1", gwapo_year="", dong="", hosu=""):
-    """서울시 ETAX 주택외건물 시가표준액을 조회한다."""
+    """서울시 ETAX 주택외건물 시가표준액을 조회한다.
+
+    Returns (results, raw_html) 튜플.
+    """
     data = {
         "sysCode": "EAX", "transSeq1": "1", "isLogin": "", "transKey": "",
         "lastCmd": "", "enc_data": "", "param_r1": "", "param_r2": "",
@@ -208,7 +218,96 @@ def etax_search(sigu_code, hdong_code, bonbun, bubun="",
         ETAX_TRAN_URL, data=data, headers=ETAX_HEADERS, verify=False, timeout=15,
     )
     html = resp.content.decode("euc-kr", errors="replace")
-    return _parse_results(html)
+    return _parse_results(html), html
+
+
+def _build_evidence_pdf(results: list, address: str, year: str) -> bytes | None:
+    """ETAX 조회 결과를 증거용 PDF로 생성한다.
+
+    원본 HTML의 rowspan 구조가 복잡하므로, 파싱된 결과로
+    깔끔한 플랫 테이블을 직접 생성한다.
+    """
+    from datetime import datetime
+    try:
+        from weasyprint import HTML as WpHTML
+        from .pdf import _safe_url_fetcher
+    except ImportError:
+        return None
+
+    if not results:
+        return None
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    _esc = _html.escape  # XSS / HTML injection 방지
+
+    # 테이블 행 생성
+    rows_html = ""
+    for i, row in enumerate(results, 1):
+        rows_html += f"""<tr>
+<td>{i}</td>
+<td>{_esc(str(row.get('year', '')))}</td>
+<td>{_esc(str(row.get('lot', '')))}</td>
+<td>{_esc(str(row.get('dong_no', '')))}</td>
+<td>{_esc(str(row.get('ho', '')))}</td>
+<td>{_esc(str(row.get('name', '')))}</td>
+<td style="font-weight:700;color:#c00;">{_esc(str(row.get('total', '')))}</td>
+<td>{_esc(str(row.get('area', '')))}</td>
+<td>{_esc(str(row.get('building', '')))}</td>
+<td>{_esc(str(row.get('land', '')))}</td>
+</tr>\n"""
+
+    safe_address = _esc(address)
+    safe_year = _esc(year or '전체')
+
+    wrapper = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap');
+  body {{ font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif; font-size: 10pt;
+         padding: 15mm; color: #333; }}
+  .header {{ border-bottom: 2px solid #c00; padding-bottom: 8px; margin-bottom: 16px; }}
+  .header h2 {{ color: #c00; margin: 0 0 4px 0; font-size: 14pt; }}
+  .meta {{ font-size: 9pt; color: #666; margin-bottom: 12px; }}
+  .count {{ font-weight: 600; margin-bottom: 8px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-bottom: 16px; }}
+  th, td {{ border: 1px solid #ccc; padding: 4px 6px; text-align: center; }}
+  th {{ background: #f0f0f0; font-weight: 600; font-size: 8pt; }}
+  .footer {{ margin-top: 20px; padding-top: 8px; border-top: 1px solid #ccc;
+             font-size: 8pt; color: #999; text-align: center; }}
+</style></head><body>
+<div class="header">
+  <h2>서울시 ETAX 주택외건물 시가표준액 — 원본 조회 결과</h2>
+</div>
+<div class="meta">
+  조회 주소: {safe_address}<br>
+  기준년도: {safe_year}<br>
+  조회일시: {now}<br>
+  출처: 서울특별시 ETAX (etax.seoul.go.kr)
+</div>
+<p class="count">총 {len(results)}건</p>
+<table>
+<thead>
+<tr><th>#</th><th>년도</th><th>번지</th><th>동</th><th>호</th><th>물건명</th>
+<th>시가표준액 (총액)</th><th>면적 (m²)</th><th>건축물</th><th>시설</th></tr>
+</thead>
+<tbody>
+{rows_html}
+</tbody>
+</table>
+<div class="footer">
+  본 문서는 서울시 ETAX(etax.seoul.go.kr) 조회 결과 원본입니다.<br>
+  조회일시: {now}
+</div>
+</body></html>"""
+
+    try:
+        return WpHTML(
+            string=wrapper,
+            url_fetcher=_safe_url_fetcher,
+        ).write_pdf()
+    except Exception:
+        return None
 
 
 def _parse_results(html):

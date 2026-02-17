@@ -39,7 +39,7 @@ JUSO_API_URL = "https://business.juso.go.kr/addrlink/addrLinkApi.do"
 def parse_address(addr_str: str) -> dict:
     """자유형식 한국어 주소를 구조화된 딕셔너리로 파싱한다."""
     result = {
-        "sido": "", "sigungu": "", "dong": "",
+        "sido": "", "sigungu": "", "sigungu_sub": "", "dong": "",
         "bonji": "", "bunji": "", "bldg_name": "",
         "dong_no": "", "ho_no": "", "floor": "", "san": False,
     }
@@ -52,6 +52,11 @@ def parse_address(addr_str: str) -> dict:
             continue
         if not result["sigungu"] and re.match(r".+[시군구]$", token):
             result["sigungu"] = re.sub(r"[시군구]$", "", token)
+            continue
+        # 하위 구 (고양시 → 일산동구, 수원시 → 팔달구 등)
+        if result["sigungu"] and not result["sigungu_sub"] and not result["dong"] \
+                and re.match(r".+구$", token):
+            result["sigungu_sub"] = token
             continue
         if not result["dong"] and re.match(r".+[읍면동가리]$", token):
             result["dong"] = re.sub(r"[읍면동가리]\d*$", "", token)
@@ -134,7 +139,7 @@ def normalize_dong_ho(val: str) -> str:
     """동/호 값을 비교용으로 정규화한다.
 
     '101동' → '101', '301호' → '301', '제101동' → '101',
-    '씨동' → 'C', '에이동' → 'A'.
+    '씨동' → 'C', '에이동' → 'A', '0101' → '101'.
     """
     val = str(val).strip()
     val = re.sub(r'[동호]$', '', val).strip()
@@ -143,6 +148,9 @@ def normalize_dong_ho(val: str) -> str:
     mapped = _KOREAN_TO_ALPHA.get(val)
     if mapped:
         return mapped
+    # 숫자만으로 구성된 경우 선행 0 제거 (0101 → 101)
+    if val.isdigit():
+        val = val.lstrip('0') or '0'
     return val.upper()
 
 
@@ -152,10 +160,13 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
     1단계: 동으로 필터 (있으면)
     2단계: 호로 추가 필터
     동이 없으면 호만으로 필터링 시도.
-    각 단계에서 필터 결과가 없으면 이전 결과를 유지한다.
 
     결과 dict의 동 필드명은 'dong' (공동주택) 또는 'dong_no' (ETAX 건물) 모두 지원.
     호 필드명은 'ho' (공통).
+
+    동/호가 지정되었으나 매치되는 결과가 없으면 빈 리스트를 반환한다 (Fail-Closed).
+    단, API가 동 정보를 비워두는 경우가 있으므로 동 필터는 결과에 동 값이
+    하나라도 존재할 때만 엄격 적용하고, 모두 비어있으면 동 필터를 건너뛴다.
     """
     if not dong_no and not ho_no:
         return results
@@ -164,12 +175,20 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
 
     if dong_no:
         norm_dong = normalize_dong_ho(dong_no)
-        dong_filtered = [
-            r for r in current
-            if normalize_dong_ho(r.get("dong", "") or r.get("dong_no", "")) == norm_dong
-        ]
-        if dong_filtered:
-            current = dong_filtered
+        # API가 동 정보를 비워두는 단지가 있으므로, 결과에 동 값이 하나라도 있는지 확인
+        has_dong_data = any(
+            (r.get("dong", "") or r.get("dong_no", "")).strip()
+            for r in current
+        )
+        if has_dong_data:
+            dong_filtered = [
+                r for r in current
+                if normalize_dong_ho(r.get("dong", "") or r.get("dong_no", "")) == norm_dong
+            ]
+            if dong_filtered:
+                current = dong_filtered
+            else:
+                return []  # 동이 지정되었으나 매치 없음
 
     if ho_no:
         norm_ho = normalize_dong_ho(ho_no)
@@ -177,6 +196,8 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
                        if normalize_dong_ho(r.get("ho", "")) == norm_ho]
         if ho_filtered:
             current = ho_filtered
+        else:
+            return []  # 호가 지정되었으나 매치 없음
 
     return current
 

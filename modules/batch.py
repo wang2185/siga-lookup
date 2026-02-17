@@ -2,6 +2,7 @@
 
 import io
 import json
+import logging
 import os
 import re
 import tempfile
@@ -16,6 +17,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 from .address import search_vworld, extract_address_components, parse_address, filter_apartment_by_dong_ho
+from .building_nonseoul import WeTaxModule as _WeTaxModule
 
 # 전역 작업 관리 (파일 기반, 멀티 워커 호환)
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -26,6 +28,8 @@ os.makedirs(_JOBS_DIR, exist_ok=True)
 # ─── 업로드 캐시 (파일 기반, 멀티 워커 호환) ───
 
 MAX_UPLOADS_KEPT = 20
+logger = logging.getLogger(__name__)
+
 _UPLOAD_CACHE_DIR = os.path.join(tempfile.gettempdir(), "siga_upload_cache")
 os.makedirs(_UPLOAD_CACHE_DIR, exist_ok=True)
 
@@ -838,13 +842,12 @@ def _process_batch(
             except Exception:
                 pass
 
-            # 5. 주택외건물 조회 (서울 ETAX)
+            # 5. 주택외건물 조회 (서울 ETAX / 비서울 WeTax)
             sido = address.get("sido", "")
             if building_seoul_module and sido in ("서울", "서울특별시"):
                 try:
                     bldg_result = building_seoul_module.search(address, year)
                     if bldg_result.success and bldg_result.results:
-                        # ETAX는 서버 측 dong/ho 필터링을 하지만, 클라이언트 측 보완 필터링
                         dong_no = address.get("dong_no", "")
                         ho_no = address.get("ho_no", "")
                         if dong_no or ho_no:
@@ -868,13 +871,54 @@ def _process_batch(
                             "result": {"results": bldg_result.results},
                             "source_key": "building_etax",
                         }
-                except Exception:
-                    pass
+                        if bldg_result.evidence:
+                            ext = bldg_result.evidence_type or "pdf"
+                            ev_fname = f"{idx:03d}_ETAX원본.{ext}"
+                            ev_fpath = os.path.join(pdf_dir, ev_fname)
+                            with open(ev_fpath, "wb") as f:
+                                f.write(bldg_result.evidence)
+                            pdf_files.append((ev_fname, ev_fpath))
+                except Exception as exc:
+                    logger.error("[BATCH] ETAX exception: %s", exc)
                 time.sleep(0.5)
+            else:
+                # 비서울: WeTax로 주택외건물 조회
+                try:
+                    _wetax = _WeTaxModule()
+                    bldg_result = _wetax.search(address, year)
+                    if bldg_result.success and bldg_result.results:
+                        dong_no = address.get("dong_no", "")
+                        ho_no = address.get("ho_no", "")
+                        if dong_no or ho_no:
+                            bldg_result.results = filter_apartment_by_dong_ho(
+                                bldg_result.results, dong_no, ho_no)
 
-            # 공동주택 또는 건물이 있으면 토지 제거 (auto 검색과 동일 로직)
-            if "apartment" in auto_sections or "building" in auto_sections:
-                auto_sections.pop("land", None)
+                    if bldg_result.success and bldg_result.results:
+                        first = bldg_result.results[0]
+                        result_row["building_name"] = first.get("name", "") if isinstance(first, dict) else ""
+                        result_row["building_total"] = first.get("total", "") if isinstance(first, dict) else ""
+                        if share is not None and result_row.get("building_total"):
+                            try:
+                                price_str = re.sub(r'[^\d]', '', str(result_row["building_total"]))
+                                if price_str:
+                                    result_row["building_total_share"] = int(int(price_str) * share)
+                            except (ValueError, TypeError):
+                                pass
+                        found_types.append("주택외건물")
+                        auto_sections["building"] = {
+                            "label": "주택외건물 시가표준액 (WeTax)",
+                            "result": {"results": bldg_result.results},
+                            "source_key": "building_wetax",
+                        }
+                        if bldg_result.evidence:
+                            ev_fname = f"{idx:03d}_WeTax스크린샷.png"
+                            ev_fpath = os.path.join(pdf_dir, ev_fname)
+                            with open(ev_fpath, "wb") as f:
+                                f.write(bldg_result.evidence)
+                            pdf_files.append((ev_fname, ev_fpath))
+                except Exception as exc:
+                    logger.error("[BATCH] WeTax exception: %s", exc)
+                time.sleep(0.5)
 
             if found_types:
                 result_row["status"] = ", ".join(found_types)
@@ -992,6 +1036,15 @@ def _resolve_address_for_batch(addr_str: str, vworld_api_key: str) -> dict:
         addr["dong_no"] = parsed["dong_no"]
     if parsed.get("ho_no") and not addr.get("ho_no"):
         addr["ho_no"] = parsed["ho_no"]
+
+    # "101-1001" 모호성 보정: parse_address가 dong_no/ho_no를 못 찾고
+    # bonji/bunji로 잘못 파싱한 경우, V-World가 별도 bonji를 제공했으면
+    # 파싱된 bonji-bunji를 dong_no-ho_no로 재해석한다.
+    if (not addr.get("dong_no") and not addr.get("ho_no")
+            and parsed.get("bunji") and addr.get("bonji")
+            and parsed.get("bonji") != addr["bonji"]):
+        addr["dong_no"] = parsed["bonji"]
+        addr["ho_no"] = parsed["bunji"]
 
     return addr
 

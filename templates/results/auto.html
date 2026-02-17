@@ -37,10 +37,16 @@
       <strong>{{ source_info.house.name }}</strong>: {{ source_info.house.authority }} ({{ source_info.house.system }}) / {{ source_info.house.law }}
     </div>
     {% endif %}
-    {% if auto_results.building and source_info.building_etax %}
+    {% if auto_results.building %}
+    {% if auto_results.building.source_key == 'building_etax' and source_info.building_etax %}
     <div style="margin-bottom:4px;">
       <strong>{{ source_info.building_etax.name }}</strong>: {{ source_info.building_etax.authority }} ({{ source_info.building_etax.system }}) / {{ source_info.building_etax.law }}
     </div>
+    {% elif auto_results.building.source_key == 'building_wetax' and source_info.building_wetax %}
+    <div style="margin-bottom:4px;">
+      <strong>{{ source_info.building_wetax.name }}</strong>: {{ source_info.building_wetax.authority }} ({{ source_info.building_wetax.system }}) / {{ source_info.building_wetax.law }}
+    </div>
+    {% endif %}
     {% endif %}
   </div>
 
@@ -219,6 +225,11 @@
         <input type="text" name="filename" placeholder="파일명 (선택)" class="pdf-filename-input" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:0.85rem;">
         <button type="submit" class="btn btn-download">PDF 다운로드</button>
       </div>
+    </form>
+    {% endif %}
+    {% if has_evidence %}
+    <form method="POST" action="/download/evidence" style="flex:0;">
+      <button type="submit" class="btn btn-secondary" title="조회 출처 원본 증거 다운로드">원본 증거</button>
     </form>
     {% endif %}
   </div>

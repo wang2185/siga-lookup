@@ -73,6 +73,29 @@ def _store_pdf_data(data: dict) -> str:
     return key
 
 
+def _store_evidence(evidence_bytes: bytes, evidence_type: str) -> str:
+    """증거 파일(PDF/PNG)을 저장하고 키를 반환한다."""
+    key = _uuid.uuid4().hex[:12]
+    ext = evidence_type or "bin"
+    path = _os.path.join(_PDF_CACHE_DIR, f"{key}_evidence.{ext}")
+    with open(path, "wb") as f:
+        f.write(evidence_bytes)
+    return key
+
+
+def _load_evidence(key: str, evidence_type: str) -> bytes | None:
+    """저장된 증거 파일을 로드한다."""
+    if not key:
+        return None
+    ext = evidence_type or "bin"
+    path = _os.path.join(_PDF_CACHE_DIR, f"{key}_evidence.{ext}")
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
 def _load_pdf_data(key: str) -> dict | None:
     """파일에서 PDF 데이터를 로드한다."""
     if not key:
@@ -215,16 +238,17 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
                     items = result.results
                     if type_key == "apartment" and (dong_no or ho_no):
                         items = filter_apartment_by_dong_ho(items, dong_no, ho_no)
-                    auto_results[type_key] = {
-                        "label": label,
-                        "results": items,
-                        "source": result.source,
-                        "property_type": result.property_type,
-                    }
+                    if items:
+                        auto_results[type_key] = {
+                            "label": label,
+                            "results": items,
+                            "source": result.source,
+                            "property_type": result.property_type,
+                        }
             except Exception as exc:
                 app.logger.error("[API-AUTO] %s exception: %s", type_key, exc)
 
-        # 서울 건물
+        # 주택외건물: 서울(ETAX) / 비서울(WeTax)
         sido = addr.get("sido", "")
         if sido in ("서울", "서울특별시"):
             try:
@@ -239,9 +263,22 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
                     }
             except Exception:
                 pass
-
-        if "apartment" in auto_results or "building" in auto_results:
-            auto_results.pop("land", None)
+        else:
+            try:
+                result = wetax_module.search(addr, year)
+                if result.success and result.results:
+                    items = result.results
+                    if dong_no or ho_no:
+                        items = filter_apartment_by_dong_ho(items, dong_no, ho_no)
+                    if items:
+                        auto_results["building"] = {
+                            "label": "주택외건물 시가표준액 (WeTax)",
+                            "results": items,
+                            "source": result.source,
+                            "property_type": result.property_type,
+                        }
+            except Exception as exc:
+                app.logger.error("[API-AUTO] wetax exception: %s", exc)
 
         all_results = []
         for type_key, info in auto_results.items():
@@ -320,7 +357,7 @@ def search():
             property_types=PROPERTY_TYPES, years=list(range(2026, 2010, -1)),
         )
 
-    # 유형 미선택 → 자동 통합 조회 (토지/공동주택/개별주택 + 서울 건물)
+    # 유형 미선택 → 자동 통합 조회 (토지/공동주택/개별주택 + 건물)
     if property_type not in PROPERTY_TYPES:
         address = _resolve_address(request.form)
         dong_no = request.form.get("dong_no", "").strip()
@@ -356,14 +393,16 @@ def search():
                             "[AUTO] apartment filter: dong=%r ho=%r -> %d results",
                             dong_no, ho_no, len(result.results),
                         )
-                    auto_results[type_key] = {
-                        "label": label,
-                        "result": result,
-                    }
+                    # 필터 후 결과가 있을 때만 추가
+                    if result.results:
+                        auto_results[type_key] = {
+                            "label": label,
+                            "result": result,
+                        }
             except Exception as exc:
                 app.logger.error("[AUTO] %s exception: %s", type_key, exc)
 
-        # 서울 주소이면 ETAX 주택외건물도 조회
+        # 주택외건물 조회: 서울(ETAX) / 비서울(WeTax) 모두 시도
         sido = address.get("sido", "")
         if sido in ("서울", "서울특별시"):
             try:
@@ -377,10 +416,23 @@ def search():
                     }
             except Exception:
                 pass
-
-        # 아파트/집합건물이 있으면 토지 공시지가 제거 (불필요)
-        if "apartment" in auto_results or "building" in auto_results:
-            auto_results.pop("land", None)
+        else:
+            # 비서울: WeTax로 주택외건물 조회
+            try:
+                result = wetax_module.search(address, year)
+                if result.success and result.results:
+                    # 동/호 필터링 적용
+                    if dong_no or ho_no:
+                        result.results = filter_apartment_by_dong_ho(
+                            result.results, dong_no, ho_no)
+                    if result.results:
+                        auto_results["building"] = {
+                            "label": "주택외건물 시가표준액 (WeTax)",
+                            "result": result,
+                            "source_key": "building_wetax",
+                        }
+            except Exception as exc:
+                app.logger.error("[AUTO] wetax exception: %s", exc)
 
         # 공동주택 결과가 많고 동/호 미입력 시 안내 플래그
         show_dong_ho_guide = False
@@ -403,6 +455,14 @@ def search():
         }
         session["last_auto_key"] = _store_pdf_data(auto_data)
 
+        # 건물 조회 증거 저장 (ETAX PDF / WeTax PNG)
+        if "building" in auto_results:
+            bldg_result = auto_results["building"]["result"]
+            if bldg_result.evidence:
+                ekey = _store_evidence(bldg_result.evidence, bldg_result.evidence_type)
+                session["last_evidence_key"] = ekey
+                session["last_evidence_type"] = bldg_result.evidence_type
+
         return render_template(
             "results/auto.html",
             auto_results=auto_results,
@@ -411,6 +471,7 @@ def search():
             source_info=SOURCE_INFO,
             show_dong_ho_guide=show_dong_ho_guide,
             apartment_count=len(auto_results["apartment"]["result"].results) if "apartment" in auto_results else 0,
+            has_evidence="building" in auto_results and auto_results["building"]["result"].evidence is not None,
         )
 
     address = _resolve_address(request.form)
@@ -450,7 +511,8 @@ def search():
     if cached:
         cached.cached = True
         session["last_result_key"] = _store_pdf_data(_result_to_dict(cached))
-        return render_template(template, result=cached, source_info=src_info)
+        return render_template(template, result=cached, source_info=src_info,
+                               has_evidence=False)
 
     # ETAX용 추가 파라미터
     kwargs = {}
@@ -485,7 +547,17 @@ def search():
         lookup_cache.set(property_type, address, year, result)
 
     session["last_result_key"] = _store_pdf_data(_result_to_dict(result))
-    return render_template(template, result=result, source_info=src_info)
+
+    # 건물 조회 증거 저장
+    has_evidence = False
+    if property_type == "building" and result.evidence:
+        ekey = _store_evidence(result.evidence, result.evidence_type)
+        session["last_evidence_key"] = ekey
+        session["last_evidence_type"] = result.evidence_type
+        has_evidence = True
+
+    return render_template(template, result=result, source_info=src_info,
+                           has_evidence=has_evidence)
 
 
 # ─── PDF 다운로드 ───
@@ -510,6 +582,36 @@ def download_auto_pdf():
         return "조회 결과가 없습니다.", 400
     custom_filename = request.form.get("filename", "").strip() or None
     return generate_auto_pdf_response(last_auto, filename=custom_filename)
+
+
+@app.route("/download/evidence", methods=["POST"])
+def download_evidence():
+    """조회 출처 증거 파일(ETAX 원본 PDF / WeTax 스크린샷)을 다운로드한다."""
+    import io as _io
+    from datetime import datetime as _dt
+    ekey = session.get("last_evidence_key")
+    etype = session.get("last_evidence_type", "")
+    if not ekey:
+        return "증거 파일이 없습니다.", 404
+    data = _load_evidence(ekey, etype)
+    if not data:
+        return "증거 파일을 찾을 수 없습니다.", 404
+
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    if etype == "pdf":
+        return send_file(
+            _io.BytesIO(data),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"ETAX_원본_{ts}.pdf",
+        )
+    else:
+        return send_file(
+            _io.BytesIO(data),
+            mimetype="image/png",
+            as_attachment=True,
+            download_name=f"WeTax_스크린샷_{ts}.png",
+        )
 
 
 # ─── 주소 API ───

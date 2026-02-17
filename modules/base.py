@@ -18,6 +18,8 @@ class LookupResult:
     message: Optional[str] = None
     logs: list[str] = field(default_factory=list)
     cached: bool = False
+    evidence: Optional[bytes] = None    # 원본 증거 (ETAX: PDF, WeTax: PNG)
+    evidence_type: str = ""             # "pdf" or "png"
 
 
 PROPERTY_TYPES = {
