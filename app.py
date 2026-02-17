@@ -220,6 +220,12 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
     addr = parse_address(address_str)
     addr["_raw"] = address_str
 
+    # 주소 문자열에서 파싱된 동/호를 기본값으로 사용 (API 파라미터가 우선)
+    if not dong_no:
+        dong_no = addr.get("dong_no", "")
+    if not ho_no:
+        ho_no = addr.get("ho_no", "")
+
     # PNU 자동 보정: parse_address만으로는 PNU가 없으므로 주소 검색 API로 보완
     addr = _resolve_pnu(addr, address_str)
 
