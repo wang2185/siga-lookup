@@ -157,8 +157,10 @@ def normalize_dong_ho(val: str) -> str:
 def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list:
     """공동주택/건물 결과를 동/호로 단계적 필터링한다.
 
-    1단계: 동으로 필터 (있으면)
-    2단계: 호로 추가 필터
+    동과 호가 모두 있는 경우:
+      1차 시도: 동+호를 합쳐 호에서 검색 (씨3401호 → ho="C3401")
+      2차 시도(폴백): 동/호를 분리하여 필터링 (dong="C", ho="3401")
+
     동이 없으면 호만으로 필터링 시도.
 
     결과 dict의 동 필드명은 'dong' (공동주택) 또는 'dong_no' (ETAX 건물) 모두 지원.
@@ -172,6 +174,20 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
         return results
 
     current = results
+
+    # 동+호 모두 있으면, 합쳐서 호 필드에서 먼저 시도
+    # (예: 씨3401호 → "C3401"로 호 매칭 시도)
+    if dong_no and ho_no:
+        norm_dong = normalize_dong_ho(dong_no)
+        norm_ho = normalize_dong_ho(ho_no)
+        combined_ho = norm_dong + norm_ho
+        combined_filtered = [
+            r for r in current
+            if normalize_dong_ho(r.get("ho", "")) == combined_ho
+        ]
+        if combined_filtered:
+            return combined_filtered
+        # 합친 값으로 매치 안 되면 아래 분리 필터링으로 폴백
 
     if dong_no:
         norm_dong = normalize_dong_ho(dong_no)
