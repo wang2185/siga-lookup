@@ -157,9 +157,9 @@ def normalize_dong_ho(val: str) -> str:
 def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list:
     """공동주택/건물 결과를 동/호로 단계적 필터링한다.
 
-    동과 호가 모두 있는 경우:
-      1차 시도: 동+호를 합쳐 호에서 검색 (씨3401호 → ho="C3401")
-      2차 시도(폴백): 동/호를 분리하여 필터링 (dong="C", ho="3401")
+    1단계: 동/호를 분리하여 필터링 (기본)
+    2단계(폴백): 분리 필터링 결과 없으면 동+호를 합쳐 호에서 검색
+              (예: 씨3401호 → ho="C3401")
 
     동이 없으면 호만으로 필터링 시도.
 
@@ -175,23 +175,9 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
 
     current = results
 
-    # 동+호 모두 있으면, 합쳐서 호 필드에서 먼저 시도
-    # (예: 씨3401호 → "C3401"로 호 매칭 시도)
-    if dong_no and ho_no:
-        norm_dong = normalize_dong_ho(dong_no)
-        norm_ho = normalize_dong_ho(ho_no)
-        combined_ho = norm_dong + norm_ho
-        combined_filtered = [
-            r for r in current
-            if normalize_dong_ho(r.get("ho", "")) == combined_ho
-        ]
-        if combined_filtered:
-            return combined_filtered
-        # 합친 값으로 매치 안 되면 아래 분리 필터링으로 폴백
-
+    # 1단계: 동/호 분리 필터링 (기본)
     if dong_no:
         norm_dong = normalize_dong_ho(dong_no)
-        # API가 동 정보를 비워두는 단지가 있으므로, 결과에 동 값이 하나라도 있는지 확인
         has_dong_data = any(
             (r.get("dong", "") or r.get("dong_no", "")).strip()
             for r in current
@@ -204,7 +190,17 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
             if dong_filtered:
                 current = dong_filtered
             else:
-                return []  # 동이 지정되었으나 매치 없음
+                # 동 매치 실패 → 합산 폴백 시도
+                if ho_no:
+                    norm_ho = normalize_dong_ho(ho_no)
+                    combined_ho = norm_dong + norm_ho
+                    combined_filtered = [
+                        r for r in results
+                        if normalize_dong_ho(r.get("ho", "")) == combined_ho
+                    ]
+                    if combined_filtered:
+                        return combined_filtered
+                return []  # 분리도 합산도 매치 없음
 
     if ho_no:
         norm_ho = normalize_dong_ho(ho_no)
@@ -213,6 +209,16 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
         if ho_filtered:
             current = ho_filtered
         else:
+            # 호 매치 실패 → 동+호 합산 폴백 시도
+            if dong_no:
+                norm_dong = normalize_dong_ho(dong_no)
+                combined_ho = norm_dong + norm_ho
+                combined_filtered = [
+                    r for r in results
+                    if normalize_dong_ho(r.get("ho", "")) == combined_ho
+                ]
+                if combined_filtered:
+                    return combined_filtered
             return []  # 호가 지정되었으나 매치 없음
 
     return current
