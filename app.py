@@ -273,22 +273,22 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
             try:
                 result = wetax_module.search(addr, year)
                 if result.success and result.results:
-                    items = result.results
-                    if dong_no or ho_no:
-                        items = filter_apartment_by_dong_ho(items, dong_no, ho_no)
-                    if items:
-                        auto_results["building"] = {
-                            "label": "주택외건물 시가표준액 (WeTax)",
-                            "results": items,
-                            "source": result.source,
-                            "property_type": result.property_type,
-                        }
+                    # WeTax는 폼에서 이미 동/호 필터링됨 → 추가 필터 불필요
+                    auto_results["building"] = {
+                        "label": "주택외건물 시가표준액 (WeTax)",
+                        "results": result.results,
+                        "source": result.source,
+                        "property_type": result.property_type,
+                    }
             except Exception as exc:
                 app.logger.error("[API-AUTO] wetax exception: %s", exc)
 
         all_results = []
         for type_key, info in auto_results.items():
             for item in info["results"]:
+                # WeTax 결과는 raw list일 수 있으므로 dict로 변환
+                if isinstance(item, (list, tuple)):
+                    item = {"_raw_cells": item}
                 item["_property_type"] = type_key
                 item["_property_label"] = info["label"]
                 item["_source"] = info.get("source", "")
@@ -423,20 +423,15 @@ def search():
             except Exception:
                 pass
         else:
-            # 비서울: WeTax로 주택외건물 조회
+            # 비서울: WeTax로 주택외건물 조회 (폼에서 이미 동/호 필터됨)
             try:
                 result = wetax_module.search(address, year)
                 if result.success and result.results:
-                    # 동/호 필터링 적용
-                    if dong_no or ho_no:
-                        result.results = filter_apartment_by_dong_ho(
-                            result.results, dong_no, ho_no)
-                    if result.results:
-                        auto_results["building"] = {
-                            "label": "주택외건물 시가표준액 (WeTax)",
-                            "result": result,
-                            "source_key": "building_wetax",
-                        }
+                    auto_results["building"] = {
+                        "label": "주택외건물 시가표준액 (WeTax)",
+                        "result": result,
+                        "source_key": "building_wetax",
+                    }
             except Exception as exc:
                 app.logger.error("[AUTO] wetax exception: %s", exc)
 

@@ -886,13 +886,7 @@ def _process_batch(
                 try:
                     _wetax = _WeTaxModule()
                     bldg_result = _wetax.search(address, year)
-                    if bldg_result.success and bldg_result.results:
-                        dong_no = address.get("dong_no", "")
-                        ho_no = address.get("ho_no", "")
-                        if dong_no or ho_no:
-                            bldg_result.results = filter_apartment_by_dong_ho(
-                                bldg_result.results, dong_no, ho_no)
-
+                    # WeTax는 폼에서 이미 동/호 필터됨 → 추가 필터 불필요
                     if bldg_result.success and bldg_result.results:
                         first = bldg_result.results[0]
                         result_row["building_name"] = first.get("name", "") if isinstance(first, dict) else ""
