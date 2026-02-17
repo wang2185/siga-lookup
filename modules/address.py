@@ -96,7 +96,7 @@ def parse_address(addr_str: str) -> dict:
         if m:
             result["dong_no"] = m.group(1)
             continue
-        # 한글+숫자+호 (씨3401호, 에이2007호, 비106호)
+        # 한글+숫자+호 — '동' 없이 붙어있는 패턴 (씨3401호, 에이2007호, 비106호)
         m = re.match(r"^제?([가-힣]{1,4})(\d+)호$", token)
         if m:
             if not result["dong_no"]:
@@ -157,9 +157,11 @@ def normalize_dong_ho(val: str) -> str:
 def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list:
     """공동주택/건물 결과를 동/호로 단계적 필터링한다.
 
-    1단계: 동/호를 분리하여 필터링 (기본)
-    2단계(폴백): 분리 필터링 결과 없으면 동+호를 합쳐 호에서 검색
-              (예: 씨3401호 → ho="C3401")
+    1단계: 동/호를 그대로(한글 포함) 분리하여 필터링
+    2단계(폴백): 한글 동을 영문 변환 후 동+호 합산 매칭
+              (예: dong='씨', ho='3401' → 'C3401')
+    3단계(폴백): 영문 변환 후 분리 매칭
+              (예: dong='씨' → 'C'로 변환하여 dong='C' 매칭)
 
     동이 없으면 호만으로 필터링 시도.
 
@@ -173,24 +175,24 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
     if not dong_no and not ho_no:
         return results
 
+    def _get_dong(r):
+        return (r.get("dong", "") or r.get("dong_no", "")).strip()
+
     current = results
 
-    # 1단계: 동/호 분리 필터링 (기본)
+    # 1단계: 동/호 분리 필터링 (한글 그대로)
     if dong_no:
         norm_dong = normalize_dong_ho(dong_no)
-        has_dong_data = any(
-            (r.get("dong", "") or r.get("dong_no", "")).strip()
-            for r in current
-        )
+        has_dong_data = any(_get_dong(r) for r in current)
         if has_dong_data:
             dong_filtered = [
                 r for r in current
-                if normalize_dong_ho(r.get("dong", "") or r.get("dong_no", "")) == norm_dong
+                if normalize_dong_ho(_get_dong(r)) == norm_dong
             ]
             if dong_filtered:
                 current = dong_filtered
             else:
-                # 동 매치 실패 → 합산 폴백 시도
+                # 동 매치 실패 → 합산 폴백 (dong+ho를 합쳐 ho에서 검색)
                 if ho_no:
                     norm_ho = normalize_dong_ho(ho_no)
                     combined_ho = norm_dong + norm_ho
