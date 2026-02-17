@@ -107,6 +107,11 @@ def parse_address(addr_str: str) -> dict:
         if m:
             result["ho_no"] = m.group(1)
             continue
+        # 영문-숫자+호 (C-2302호, A-502호 — 갤러리아팰리스 등)
+        m = re.match(r"^제?([A-Za-z])-?(\d+)호$", token)
+        if m:
+            result["ho_no"] = m.group(1).upper() + "-" + m.group(2)
+            continue
         # 한글-숫자 (에이-502, 나-103)
         m = re.match(r"^([가-힣]{1,4})-(\d+)$", token)
         if m:
@@ -211,9 +216,17 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
         if ho_filtered:
             current = ho_filtered
         else:
-            # 호 매치 실패 → 동+호 합산 폴백 시도
+            # 폴백 1: API ho에 동 접두어가 포함된 경우 (ho="C-2302" → "2302"로 비교)
+            # 동이 이미 매치된 상태에서, ho에서 "동-" 접두어를 제거하고 재비교
             if dong_no:
                 norm_dong = normalize_dong_ho(dong_no)
+                stripped_filtered = [
+                    r for r in current
+                    if _strip_dong_prefix(normalize_dong_ho(r.get("ho", "")), norm_dong) == norm_ho
+                ]
+                if stripped_filtered:
+                    return stripped_filtered
+                # 폴백 2: 동+호 합산 (dong=씨 + ho=3401 → C3401)
                 combined_ho = norm_dong + norm_ho
                 combined_filtered = [
                     r for r in results
@@ -224,6 +237,27 @@ def filter_apartment_by_dong_ho(results: list, dong_no: str, ho_no: str) -> list
             return []  # 호가 지정되었으나 매치 없음
 
     return current
+
+
+def _strip_dong_prefix(ho_val: str, dong_val: str) -> str:
+    """호 값에서 동 접두어를 제거한다.
+
+    API가 ho="C-2302"처럼 동 접두어를 포함하는 경우,
+    dong="C"가 이미 매치된 상태에서 호 비교를 위해 접두어를 제거.
+    (C-2302 → 2302, A502 → 502)
+    """
+    if not ho_val or not dong_val:
+        return ho_val
+    # "C-2302" → dong="C" → strip "C-" → "2302"
+    prefix_dash = dong_val + "-"
+    if ho_val.startswith(prefix_dash):
+        return ho_val[len(prefix_dash):]
+    # "C2302" → dong="C" → strip "C" → "2302"
+    if ho_val.startswith(dong_val) and len(ho_val) > len(dong_val):
+        rest = ho_val[len(dong_val):]
+        if rest[0].isdigit():
+            return rest
+    return ho_val
 
 
 def search_vworld(keyword: str, api_key: str, page: int = 1, count: int = 10) -> dict:
