@@ -747,6 +747,7 @@ def _process_batch(
             "building_name": "",
             "building_total": "",
             "building_total_share": "",
+            "building_error": "",
             "status": "",
         }
 
@@ -769,58 +770,64 @@ def _process_batch(
 
             found_types = []
 
-            # 2. 토지 조회
-            try:
-                land_result = land_module.search(address, year)
-                if land_result.success and land_result.results:
-                    first = land_result.results[0]
-                    result_row["land_price_per_sqm"] = first.get("price_per_sqm", "")
-                    result_row["land_area"] = first.get("land_area", "")
-                    result_row["land_total_price"] = first.get("total_price", "")
-                    if share is not None and first.get("total_price"):
-                        try:
-                            result_row["land_total_price_share"] = int(float(first["total_price"]) * share)
-                        except (ValueError, TypeError):
-                            pass
-                    found_types.append("토지")
-                    auto_sections["land"] = {
-                        "label": "토지 공시지가",
-                        "result": {"results": land_result.results},
-                        "source_key": "land",
-                    }
-            except Exception:
-                pass
-            time.sleep(0.5)
+            # 집합건물 판정: 동/호가 있으면 개별 토지 조회 생략
+            is_collective = bool(address.get("dong_no") or address.get("ho_no"))
+            is_officetel = address.get("building_type_hint") == "오피스텔"
 
-            # 3. 공동주택 조회
-            try:
-                apt_result = apartment_module.search(address, year)
-                if apt_result.success and apt_result.results:
-                    # 동/호 필터링 적용
-                    dong_no = address.get("dong_no", "")
-                    ho_no = address.get("ho_no", "")
-                    if dong_no or ho_no:
-                        apt_result.results = filter_apartment_by_dong_ho(
-                            apt_result.results, dong_no, ho_no)
+            # 2. 토지 조회 (집합건물이면 생략)
+            if not is_collective:
+                try:
+                    land_result = land_module.search(address, year)
+                    if land_result.success and land_result.results:
+                        first = land_result.results[0]
+                        result_row["land_price_per_sqm"] = first.get("price_per_sqm", "")
+                        result_row["land_area"] = first.get("land_area", "")
+                        result_row["land_total_price"] = first.get("total_price", "")
+                        if share is not None and first.get("total_price"):
+                            try:
+                                result_row["land_total_price_share"] = int(float(first["total_price"]) * share)
+                            except (ValueError, TypeError):
+                                pass
+                        found_types.append("토지")
+                        auto_sections["land"] = {
+                            "label": "토지 공시지가",
+                            "result": {"results": land_result.results},
+                            "source_key": "land",
+                        }
+                except Exception:
+                    pass
+                time.sleep(0.5)
 
-                if apt_result.success and apt_result.results:
-                    first = apt_result.results[0]
-                    result_row["apt_building_name"] = first.get("building_name", "")
-                    result_row["apt_price"] = first.get("price", "")
-                    if share is not None and first.get("price"):
-                        try:
-                            result_row["apt_price_share"] = int(float(first["price"]) * share)
-                        except (ValueError, TypeError):
-                            pass
-                    found_types.append("공동주택")
-                    auto_sections["apartment"] = {
-                        "label": "공동주택 공시가격",
-                        "result": {"results": apt_result.results},
-                        "source_key": "apartment",
-                    }
-            except Exception:
-                pass
-            time.sleep(0.5)
+            # 3. 공동주택 조회 (오피스텔이면 생략)
+            if not is_officetel:
+                try:
+                    apt_result = apartment_module.search(address, year)
+                    if apt_result.success and apt_result.results:
+                        # 동/호 필터링 적용
+                        dong_no = address.get("dong_no", "")
+                        ho_no = address.get("ho_no", "")
+                        if dong_no or ho_no:
+                            apt_result.results = filter_apartment_by_dong_ho(
+                                apt_result.results, dong_no, ho_no)
+
+                    if apt_result.success and apt_result.results:
+                        first = apt_result.results[0]
+                        result_row["apt_building_name"] = first.get("building_name", "")
+                        result_row["apt_price"] = first.get("price", "")
+                        if share is not None and first.get("price"):
+                            try:
+                                result_row["apt_price_share"] = int(float(first["price"]) * share)
+                            except (ValueError, TypeError):
+                                pass
+                        found_types.append("공동주택")
+                        auto_sections["apartment"] = {
+                            "label": "공동주택 공시가격",
+                            "result": {"results": apt_result.results},
+                            "source_key": "apartment",
+                        }
+                except Exception:
+                    pass
+                time.sleep(0.5)
 
             # 4. 개별주택 조회
             try:
@@ -878,6 +885,8 @@ def _process_batch(
                             with open(ev_fpath, "wb") as f:
                                 f.write(bldg_result.evidence)
                             pdf_files.append((ev_fname, ev_fpath))
+                    if bldg_result.message:
+                        result_row["building_error"] = bldg_result.message
                 except Exception as exc:
                     logger.error("[BATCH] ETAX exception: %s", exc)
                 time.sleep(0.5)
@@ -889,8 +898,8 @@ def _process_batch(
                     # WeTax는 폼에서 이미 동/호 필터됨 → 추가 필터 불필요
                     if bldg_result.success and bldg_result.results:
                         first = bldg_result.results[0]
-                        result_row["building_name"] = first.get("name", "") if isinstance(first, dict) else ""
-                        result_row["building_total"] = first.get("total", "") if isinstance(first, dict) else ""
+                        result_row["building_name"] = first.get("name", "")
+                        result_row["building_total"] = first.get("total", "")
                         if share is not None and result_row.get("building_total"):
                             try:
                                 price_str = re.sub(r'[^\d]', '', str(result_row["building_total"]))
@@ -910,6 +919,8 @@ def _process_batch(
                             with open(ev_fpath, "wb") as f:
                                 f.write(bldg_result.evidence)
                             pdf_files.append((ev_fname, ev_fpath))
+                    if bldg_result.message:
+                        result_row["building_error"] = bldg_result.message
                 except Exception as exc:
                     logger.error("[BATCH] WeTax exception: %s", exc)
                 time.sleep(0.5)
@@ -1024,12 +1035,14 @@ def _resolve_address_for_batch(addr_str: str, vworld_api_key: str) -> dict:
         addr = parse_address(addr_str)
         addr["_raw"] = addr_str
 
-    # parse_address로 dong_no, ho_no 추출하여 병합
+    # parse_address로 dong_no, ho_no, building_type_hint 추출하여 병합
     parsed = parse_address(addr_str)
     if parsed.get("dong_no") and not addr.get("dong_no"):
         addr["dong_no"] = parsed["dong_no"]
     if parsed.get("ho_no") and not addr.get("ho_no"):
         addr["ho_no"] = parsed["ho_no"]
+    if parsed.get("building_type_hint"):
+        addr["building_type_hint"] = parsed["building_type_hint"]
 
     # "101-1001" 모호성 보정: parse_address가 dong_no/ho_no를 못 찾고
     # bonji/bunji로 잘못 파싱한 경우, V-World가 별도 bonji를 제공했으면
@@ -1064,7 +1077,7 @@ def _generate_output_excel(results: list[dict]) -> bytes:
     # 지분/소유자/건물 데이터가 있는지 확인
     has_share = any(r.get("share") is not None for r in results)
     has_owner = any(r.get("owner") for r in results)
-    has_building = any(r.get("building_name") or r.get("building_total") for r in results)
+    has_building = any(r.get("building_name") or r.get("building_total") or r.get("building_error") for r in results)
 
     # 소유자가 있으면 소유자별 정렬
     if has_owner:
@@ -1095,6 +1108,7 @@ def _generate_output_excel(results: list[dict]) -> bytes:
         headers += ["주택외건물_소재지", "주택외건물_시가표준액(원)"]
         if has_share:
             headers.append("주택외건물_지분적용(원)")
+        headers.append("주택외건물_비고")
     headers.append("조회상태")
 
     for col_idx, header in enumerate(headers, 1):
@@ -1143,6 +1157,7 @@ def _generate_output_excel(results: list[dict]) -> bytes:
             ]
             if has_share:
                 values.append(_to_number(row_data.get("building_total_share", "")))
+            values.append(row_data.get("building_error", ""))
         values.append(row_data.get("status", ""))
 
         for col_idx, val in enumerate(values, 1):
@@ -1179,6 +1194,8 @@ def _generate_output_excel(results: list[dict]) -> bytes:
             ws.column_dimensions[col_letter].width = 10
         elif "건물명" in h or "소재지" in h:
             ws.column_dimensions[col_letter].width = 20
+        elif "비고" in h:
+            ws.column_dimensions[col_letter].width = 25
         elif "면적" in h:
             ws.column_dimensions[col_letter].width = 12
         elif "조회상태" in h:

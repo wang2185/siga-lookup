@@ -366,19 +366,96 @@ def _click_search_and_extract(driver, logs):
     return results, evidence
 
 
+# ─── 테이블 결과 dict 변환 ───
+
+_HEADER_KEY_MAP = [
+    (("소재지", "물건"), "name"),
+    (("시가표준액", "과세"), "total"),
+    (("면적", "연면적"), "area"),
+    (("기준년도", "년도"), "year"),
+    (("지번", "번지"), "lot"),
+]
+
+_ERROR_PATTERNS = [
+    "존재하지 않습니다", "조회되지 않습니다",
+    "결과가 없습니다", "입력해야 합니다",
+]
+
+
+def _map_header_to_key(header_text):
+    """테이블 헤더 텍스트를 dict 키로 매핑한다."""
+    text = header_text.strip()
+    if text == "동":
+        return "dong_no"
+    if text == "호":
+        return "ho"
+    for keywords, key in _HEADER_KEY_MAP:
+        for kw in keywords:
+            if kw in text:
+                return key
+    return None
+
+
+def _extract_table_rows(table):
+    """단일 테이블에서 dict 행 리스트를 추출한다."""
+    rows = []
+
+    # 헤더 추출 (thead 우선, 없으면 첫 번째 tr의 th)
+    headers = []
+    thead_els = table.find_elements(By.TAG_NAME, "thead")
+    if thead_els:
+        for th in thead_els[0].find_elements(By.TAG_NAME, "th"):
+            headers.append(th.text.strip())
+    if not headers:
+        tr_els = table.find_elements(By.TAG_NAME, "tr")
+        if tr_els:
+            for th in tr_els[0].find_elements(By.TAG_NAME, "th"):
+                headers.append(th.text.strip())
+
+    key_map = [_map_header_to_key(h) for h in headers] if headers else []
+
+    for tr in table.find_elements(By.TAG_NAME, "tr"):
+        cells = tr.find_elements(By.TAG_NAME, "td")
+        if not cells:
+            continue
+        data = [c.text.strip() for c in cells]
+        if not any(data):
+            continue
+
+        # 에러 메시지 행 제외
+        joined = " ".join(data)
+        if any(p in joined for p in _ERROR_PATTERNS):
+            continue
+
+        # dict 변환
+        if key_map:
+            row_dict = {}
+            for i, val in enumerate(data):
+                if i < len(key_map) and key_map[i] and val:
+                    row_dict[key_map[i]] = val
+            if row_dict:
+                rows.append(row_dict)
+        else:
+            # 헤더 없는 경우: 컬럼 수에 따라 휴리스틱 매핑
+            if len(data) >= 3:
+                rows.append({"name": data[0], "total": data[1], "area": data[2]})
+            elif len(data) == 2:
+                rows.append({"name": data[0], "total": data[1]})
+            elif len(data) == 1 and data[0]:
+                rows.append({"name": data[0]})
+
+    return rows
+
+
 def _extract_all_results(driver):
+    """테이블에서 결과를 dict 리스트로 추출한다."""
     results = []
     for tid in ["tb_BldsCpbInq", "tb_BldsCpbInqTmp", "tb_hos", "tb_mfh"]:
         try:
             table = driver.find_element(By.ID, tid)
             if not table.is_displayed():
                 continue
-            for row in table.find_elements(By.TAG_NAME, "tr"):
-                cells = row.find_elements(By.TAG_NAME, "td")
-                if cells:
-                    data = [c.text.strip() for c in cells]
-                    if any(data):
-                        results.append(data)
+            results.extend(_extract_table_rows(table))
         except NoSuchElementException:
             continue
 
@@ -389,12 +466,7 @@ def _extract_all_results(driver):
                 for table in driver.find_elements(By.CSS_SELECTOR, sel):
                     if not table.is_displayed():
                         continue
-                    for row in table.find_elements(By.TAG_NAME, "tr"):
-                        cells = row.find_elements(By.TAG_NAME, "td")
-                        if cells:
-                            data = [c.text.strip() for c in cells]
-                            if any(data):
-                                results.append(data)
+                    results.extend(_extract_table_rows(table))
             except Exception:
                 continue
     return results

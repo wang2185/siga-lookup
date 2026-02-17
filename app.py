@@ -233,11 +233,18 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
     if property_type not in PROPERTY_TYPES:
         auto_results = {}
 
+        is_collective = bool(dong_no or ho_no)
+        is_officetel = addr.get("building_type_hint") == "오피스텔"
+
         for type_key, mod, label in [
             ("land", land_module, "토지 개별공시지가"),
             ("apartment", apartment_module, "공동주택 공시가격"),
             ("house", house_module, "개별주택 공시가격"),
         ]:
+            if type_key == "land" and is_collective:
+                continue
+            if type_key == "apartment" and is_officetel:
+                continue
             try:
                 result = mod.search(addr, year)
                 if result.success and result.results:
@@ -286,9 +293,6 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
         all_results = []
         for type_key, info in auto_results.items():
             for item in info["results"]:
-                # WeTax 결과는 raw list일 수 있으므로 dict로 변환
-                if isinstance(item, (list, tuple)):
-                    item = {"_raw_cells": item}
                 item["_property_type"] = type_key
                 item["_property_label"] = info["label"]
                 item["_source"] = info.get("source", "")
@@ -379,11 +383,20 @@ def search():
         )
         auto_results = {}
 
+        # 집합건물 판정: 동/호가 있으면 개별 토지 조회 생략
+        is_collective = bool(dong_no or ho_no)
+        # 오피스텔: 공동주택이 아니므로 공동주택 공시가격 조회 생략
+        is_officetel = address.get("building_type_hint") == "오피스텔"
+
         for type_key, module, label in [
             ("land", land_module, "토지 개별공시지가"),
             ("apartment", apartment_module, "공동주택 공시가격"),
             ("house", house_module, "개별주택 공시가격"),
         ]:
+            if type_key == "land" and is_collective:
+                continue
+            if type_key == "apartment" and is_officetel:
+                continue
             try:
                 result = module.search(address, year)
                 app.logger.info(

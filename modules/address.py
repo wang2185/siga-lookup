@@ -36,6 +36,9 @@ VWORLD_SEARCH_URL = "https://api.vworld.kr/req/search"
 JUSO_API_URL = "https://business.juso.go.kr/addrlink/addrLinkApi.do"
 
 
+_NON_APT_KEYWORDS = ("오피스텔",)
+
+
 def parse_address(addr_str: str) -> dict:
     """자유형식 한국어 주소를 구조화된 딕셔너리로 파싱한다."""
     result = {
@@ -136,6 +139,15 @@ def parse_address(addr_str: str) -> dict:
     # dong_no가 dong과 동일하면 클리어 (중복 행정동명: "개포동 ... 개포동 개포자이")
     if result["dong_no"] and result["dong"] and result["dong_no"] == result["dong"]:
         result["dong_no"] = ""
+
+    # 건물 유형 키워드 감지 (오피스텔 등 → 공동주택이 아닌 주택외건물)
+    for kw in _NON_APT_KEYWORDS:
+        if kw in addr_str:
+            result["building_type_hint"] = kw
+            # dong_no에 키워드가 포함되어 있으면 분리 ("오피스텔103" → "103")
+            if result["dong_no"] and kw in result["dong_no"]:
+                result["dong_no"] = result["dong_no"].replace(kw, "")
+            break
 
     return result
 
