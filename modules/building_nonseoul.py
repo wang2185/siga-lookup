@@ -333,6 +333,56 @@ def _fill_dong_ho(driver, dong_no, ho_no):
                     break
 
 
+def _hide_security_popups(driver):
+    """키보드 보안 팝업 등 불필요한 오버레이 요소를 숨긴다."""
+    try:
+        driver.execute_script("""
+            // 키보드 보안 프로그램 관련 요소 제거
+            var selectors = [
+                '[class*="nppfs"]', '[class*="NPPFS"]',
+                '[id*="nppfs"]', '[id*="NPPFS"]',
+                '[class*="keyboard"]', '[class*="Keyboard"]',
+                '[class*="astx"]', '[class*="ASTx"]',
+                '[class*="touchen"]', '[class*="TouchEn"]',
+                '[class*="nProtect"]', '[class*="nprotect"]',
+                '[class*="initech"]', '[class*="INITECH"]',
+                '[class*="KDefense"]', '[class*="kdefense"]',
+                '[class*="npPfsTarget"]',
+                'div.npPfsTarget',
+                '#nppfs-wrapper',
+                'iframe[src*="security"]',
+                'iframe[src*="nppfs"]',
+                'iframe[src*="touchen"]',
+                'iframe[src*="astx"]'
+            ];
+            selectors.forEach(function(sel) {
+                try {
+                    document.querySelectorAll(sel).forEach(function(el) {
+                        el.style.setProperty('display', 'none', 'important');
+                        el.style.setProperty('visibility', 'hidden', 'important');
+                    });
+                } catch(e) {}
+            });
+            // 우측 하단 고정 위치 소형 요소 제거 (보안 팝업 특성)
+            document.querySelectorAll('div, iframe, object, embed, span').forEach(function(el) {
+                try {
+                    var style = window.getComputedStyle(el);
+                    if (style.position === 'fixed' || style.position === 'absolute') {
+                        var rect = el.getBoundingClientRect();
+                        var vw = window.innerWidth;
+                        var vh = window.innerHeight;
+                        if (rect.left > vw - 400 && rect.top > vh - 300 &&
+                            rect.width < 400 && rect.height < 200 && rect.width > 0) {
+                            el.style.setProperty('display', 'none', 'important');
+                        }
+                    }
+                } catch(e) {}
+            });
+        """)
+    except Exception:
+        pass
+
+
 def _click_search_and_extract(driver, logs):
     """검색 버튼 클릭 → alert 처리 → 결과 추출 → 스크린샷 캡처."""
     logs.append("검색 실행")
@@ -356,6 +406,9 @@ def _click_search_and_extract(driver, logs):
     results = _extract_all_results(driver)
     logs.append(f"결과 {len(results)}건 수집")
 
+    # 스크린샷 전 키보드 보안 팝업 제거
+    _hide_security_popups(driver)
+
     evidence = None
     try:
         evidence = driver.get_screenshot_as_png()
@@ -369,12 +422,22 @@ def _click_search_and_extract(driver, logs):
 # ─── 테이블 결과 dict 변환 ───
 
 _HEADER_KEY_MAP = [
-    (("소재지", "물건"), "name"),
-    (("시가표준액", "과세"), "total"),
-    (("면적", "연면적"), "area"),
-    (("기준년도", "년도"), "year"),
-    (("지번", "번지"), "lot"),
+    (("소재지", "물건", "건물명", "건물소재"), "name"),
+    (("시가표준액", "과세", "표준액"), "total"),
+    (("면적", "연면적", "㎡", "m²"), "area"),
+    (("기준년도", "년도", "기준년", "과세년"), "year"),
+    (("지번", "번지", "본번"), "lot"),
+    (("구조",), "structure"),
+    (("용도",), "usage"),
 ]
+
+# WeTax 테이블 ID별 알려진 컬럼 매핑 (헤더 파싱 실패 시 폴백)
+_WETAX_KNOWN_COLUMNS = {
+    "tb_BldsCpbInq": ["_idx", "year", "lot", "dong_no", "ho", "name", "total", "area"],
+    "tb_BldsCpbInqTmp": ["_idx", "year", "lot", "dong_no", "ho", "name", "total", "area"],
+    "tb_hos": ["_idx", "dong_no", "ho", "name", "total", "area"],
+    "tb_mfh": ["_idx", "year", "name", "total"],
+}
 
 _ERROR_PATTERNS = [
     "존재하지 않습니다", "조회되지 않습니다",
@@ -396,16 +459,32 @@ def _map_header_to_key(header_text):
     return None
 
 
+def _pick_best_header_row(thead_el):
+    """다중 행 thead에서 최적의 헤더 행을 선택한다.
+
+    단일 행이면 그대로 반환. 다중 행인 경우 colspan/rowspan 그룹 헤더가 아닌
+    개별 컬럼 레벨 헤더(th 수가 가장 많은 행)를 선택한다.
+    """
+    header_trs = thead_el.find_elements(By.TAG_NAME, "tr")
+    if not header_trs:
+        return []
+    if len(header_trs) == 1:
+        return [th.text.strip() for th in header_trs[0].find_elements(By.TAG_NAME, "th")]
+
+    # th 수가 가장 많은 행 선택 (개별 컬럼 레벨 = th가 가장 많음)
+    best_row = max(header_trs, key=lambda tr: len(tr.find_elements(By.TAG_NAME, "th")))
+    return [th.text.strip() for th in best_row.find_elements(By.TAG_NAME, "th")]
+
+
 def _extract_table_rows(table):
     """단일 테이블에서 dict 행 리스트를 추출한다."""
     rows = []
 
-    # 헤더 추출 (thead 우선, 없으면 첫 번째 tr의 th)
+    # 헤더 추출 (thead 우선 — 다중 행 헤더 지원)
     headers = []
     thead_els = table.find_elements(By.TAG_NAME, "thead")
     if thead_els:
-        for th in thead_els[0].find_elements(By.TAG_NAME, "th"):
-            headers.append(th.text.strip())
+        headers = _pick_best_header_row(thead_els[0])
     if not headers:
         tr_els = table.find_elements(By.TAG_NAME, "tr")
         if tr_els:
@@ -413,6 +492,18 @@ def _extract_table_rows(table):
                 headers.append(th.text.strip())
 
     key_map = [_map_header_to_key(h) for h in headers] if headers else []
+
+    # 첫 번째 데이터 행의 컬럼 수를 확인하여 key_map 유효성 검증
+    first_data_len = 0
+    for tr in table.find_elements(By.TAG_NAME, "tr"):
+        cells = tr.find_elements(By.TAG_NAME, "td")
+        if cells:
+            first_data_len = len(cells)
+            break
+
+    # key_map 수와 데이터 컬럼 수가 불일치하면 헤더 매핑을 포기 (폴백에 맡김)
+    if key_map and first_data_len and len(key_map) != first_data_len:
+        key_map = []
 
     for tr in table.find_elements(By.TAG_NAME, "tr"):
         cells = tr.find_elements(By.TAG_NAME, "td")
@@ -447,6 +538,30 @@ def _extract_table_rows(table):
     return rows
 
 
+def _extract_table_rows_by_columns(table, column_keys):
+    """알려진 컬럼 매핑으로 테이블 데이터 행을 추출한다 (헤더 파싱 실패 시 폴백)."""
+    rows = []
+    for tr in table.find_elements(By.TAG_NAME, "tr"):
+        cells = tr.find_elements(By.TAG_NAME, "td")
+        if not cells:
+            continue
+        data = [c.text.strip() for c in cells]
+        if not any(data):
+            continue
+        joined = " ".join(data)
+        if any(p in joined for p in _ERROR_PATTERNS):
+            continue
+        row_dict = {}
+        for i, val in enumerate(data):
+            if i < len(column_keys) and val:
+                key = column_keys[i]
+                if not key.startswith("_"):  # _로 시작하는 키는 건너뜀
+                    row_dict[key] = val
+        if row_dict:
+            rows.append(row_dict)
+    return rows
+
+
 def _extract_all_results(driver):
     """테이블에서 결과를 dict 리스트로 추출한다."""
     results = []
@@ -455,7 +570,11 @@ def _extract_all_results(driver):
             table = driver.find_element(By.ID, tid)
             if not table.is_displayed():
                 continue
-            results.extend(_extract_table_rows(table))
+            rows = _extract_table_rows(table)
+            # 헤더 파싱 실패 시 알려진 컬럼 매핑으로 재시도
+            if not rows and tid in _WETAX_KNOWN_COLUMNS:
+                rows = _extract_table_rows_by_columns(table, _WETAX_KNOWN_COLUMNS[tid])
+            results.extend(rows)
         except NoSuchElementException:
             continue
 
