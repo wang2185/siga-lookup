@@ -11,6 +11,17 @@ from .base import BaseLookupModule, LookupResult
 
 WETAX_URL = "https://www.wetax.go.kr/tcp/loi/J030401M01.do"
 
+# 시/도 약칭 → 정식 명칭 매핑 (WeTax 드롭다운은 정식 명칭 사용)
+_SIDO_FULL = {
+    "서울": "서울특별시", "부산": "부산광역시", "대구": "대구광역시",
+    "인천": "인천광역시", "광주": "광주광역시", "대전": "대전광역시",
+    "울산": "울산광역시", "세종": "세종특별자치시",
+    "경기": "경기도", "강원": "강원특별자치도",
+    "충북": "충청북도", "충남": "충청남도",
+    "전북": "전북특별자치도", "전남": "전라남도",
+    "경북": "경상북도", "경남": "경상남도", "제주": "제주특별자치도",
+}
+
 
 class WeTaxModule(BaseLookupModule):
 
@@ -79,10 +90,16 @@ class WeTaxModule(BaseLookupModule):
                     _click_radio_by_label_text(driver, "기존")
             time.sleep(1)
 
-            # 시/도
-            logs.append(f"시/도 선택: {addr.get('sido', '')}")
-            if not _wait_and_select(driver, "selUpLgvCd", addr.get("sido", "")):
-                logs.append("시/도 선택 실패")
+            # 시/도 (약칭 → 정식 명칭 변환)
+            sido_kw = addr.get("sido", "")
+            sido_full = _SIDO_FULL.get(sido_kw, sido_kw)
+            logs.append(f"시/도 선택: {sido_kw}")
+            if not _wait_and_select(driver, "selUpLgvCd", sido_full):
+                # 정식명칭 실패 시 약칭으로 재시도
+                if sido_full != sido_kw:
+                    _wait_and_select(driver, "selUpLgvCd", sido_kw)
+                else:
+                    logs.append("시/도 선택 실패")
             time.sleep(2)
 
             # 시/군/구 — 하위 구가 있으면 우선 사용 (고양시 일산동구 등)
