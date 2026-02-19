@@ -104,6 +104,7 @@ class WeTaxModule(BaseLookupModule):
 
             # 기준년도
             _select_first_valid_option(driver, "selCrtrYr")
+            selected_year = _get_selected_text(driver, "selCrtrYr")
             time.sleep(0.5)
 
             # 특수번지
@@ -151,6 +152,21 @@ class WeTaxModule(BaseLookupModule):
                     _fill_dong_ho(driver, "1", ho_no)
                     time.sleep(0.5)
                     results, evidence = _click_search_and_extract(driver, logs)
+
+            # 테이블에 없는 키를 입력 주소에서 보충
+            lot_str = addr.get("bonji", "")
+            if addr.get("bunji"):
+                lot_str += f"-{addr['bunji']}"
+            fill_defaults = {
+                "year": selected_year,
+                "lot": lot_str,
+                "dong_no": addr.get("dong_no", ""),
+                "ho": addr.get("ho_no", ""),
+            }
+            for row in results:
+                for key, val in fill_defaults.items():
+                    if not row.get(key) and val:
+                        row[key] = val
 
             message = None
             if not results:
@@ -270,6 +286,18 @@ def _select_first_valid_option(driver, select_id):
                 return
     except NoSuchElementException:
         pass
+
+
+def _get_selected_text(driver, select_id):
+    """select 요소에서 현재 선택된 option의 텍스트를 반환한다."""
+    try:
+        el = driver.find_element(By.ID, select_id)
+        for opt in el.find_elements(By.TAG_NAME, "option"):
+            if opt.is_selected():
+                return opt.text.strip()
+    except Exception:
+        pass
+    return ""
 
 
 def _select_option_containing(driver, select_id, keyword):
