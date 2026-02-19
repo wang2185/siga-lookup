@@ -61,10 +61,15 @@ def parse_address(addr_str: str) -> dict:
                 and re.match(r".+구$", token):
             result["sigungu_sub"] = token
             continue
-        if not result["dong"] and re.match(r".+[읍면동가리]$", token):
-            result["dong"] = re.sub(r"[읍면동가리]\d*$", "", token)
-            result["dong"] = re.sub(r"\d+$", "", result["dong"])
-            continue
+        if re.match(r".+[읍면동가리]$", token):
+            # 읍/면 뒤에 리가 오면 리를 dong으로 갱신 (부발읍 무촌리 → dong=무촌)
+            if result["dong"] and re.match(r".+리$", token):
+                result["dong"] = re.sub(r"리$", "", token)
+                continue
+            if not result["dong"]:
+                result["dong"] = re.sub(r"[읍면동가리]\d*$", "", token)
+                result["dong"] = re.sub(r"\d+$", "", result["dong"])
+                continue
         if token == "산":
             result["san"] = True
             continue
