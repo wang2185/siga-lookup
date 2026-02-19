@@ -19,7 +19,6 @@ from modules.factory import FactoryModule
 from modules.land import LandPriceModule
 from modules.apartment import ApartmentPriceModule
 from modules.house import HousePriceModule
-from modules.commercial import CommercialPriceModule
 from modules.cache import LookupCache
 from modules.pdf import generate_pdf_response
 from modules.batch import (
@@ -40,7 +39,6 @@ factory_module = FactoryModule()
 land_module = LandPriceModule(api_key=Config.VWORLD_API_KEY)
 apartment_module = ApartmentPriceModule(api_key=Config.VWORLD_API_KEY)
 house_module = HousePriceModule(api_key=Config.VWORLD_API_KEY)
-commercial_module = CommercialPriceModule()
 
 lookup_cache = LookupCache()
 
@@ -113,7 +111,6 @@ MODULES = {
     "apartment": apartment_module,
     "house": house_module,
     "building": None,  # 서울/비서울 자동 분기
-    "commercial": commercial_module,
     "factory": factory_module,
 }
 
@@ -370,6 +367,7 @@ def search():
     # 유형 미선택 → 자동 통합 조회 (토지/공동주택/개별주택 + 건물)
     if property_type not in PROPERTY_TYPES:
         address = _resolve_address(request.form)
+        address = _resolve_pnu(address, address.get("_raw", ""))
         dong_no = request.form.get("dong_no", "").strip()
         ho_no = request.form.get("ho_no", "").strip()
         # address dict에서도 dong/ho 추출 (주소에서 파싱된 경우 보완)
@@ -489,6 +487,7 @@ def search():
         )
 
     address = _resolve_address(request.form)
+    address = _resolve_pnu(address, address.get("_raw", ""))
 
     # building(서울) → ETAX 전용 파라미터 처리
     module = _get_module(property_type, address)
@@ -504,7 +503,6 @@ def search():
         "apartment": "results/apartment.html",
         "house": "results/house.html",
         "building": "results/building.html",
-        "commercial": "results/commercial.html",
         "factory": "results/factory.html",
     }
     template = TEMPLATE_MAP.get(property_type)

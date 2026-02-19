@@ -27,7 +27,6 @@ PROPERTY_TYPES = {
     "apartment":  "공동주택 (공동주택가격)",
     "house":      "개별주택 (개별주택가격)",
     "building":   "주택외건물 (시가표준액)",
-    "commercial": "상가/오피스텔 (기준시가)",
     "factory":    "공장 (시가표준액)",
 }
 
@@ -81,14 +80,6 @@ SOURCE_INFO = {
         "system": "WeTax (wetax.go.kr)",
         "law": "지방세법 제4조 (시가표준액)",
         "url": "https://www.wetax.go.kr",
-    },
-    "commercial": {
-        "name": "상업용 건물 기준시가",
-        "authority": "국세청",
-        "provider": "국세청 홈택스",
-        "system": "국세청 홈택스 (hometax.go.kr)",
-        "law": "소득세법 제99조, 상속세 및 증여세법 제61조",
-        "url": "https://www.hometax.go.kr",
     },
     "factory": {
         "name": "공장 시가표준액",
