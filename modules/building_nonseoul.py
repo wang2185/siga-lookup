@@ -60,6 +60,7 @@ class WeTaxModule(BaseLookupModule):
             driver.get(WETAX_URL)
             time.sleep(3)
             logs.append("위택스 페이지 접속 완료")
+            _hide_security_popups(driver)
 
             # 건물 유형 라디오
             if building_type == "factory":
@@ -362,50 +363,19 @@ def _fill_dong_ho(driver, dong_no, ho_no):
 
 
 def _hide_security_popups(driver):
-    """키보드 보안 팝업 등 불필요한 오버레이 요소를 숨긴다."""
+    """키보드 보안 팝업(NOS 등)을 '오늘하루 그만보기'로 닫는다."""
     try:
         driver.execute_script("""
-            // 키보드 보안 프로그램 관련 요소 제거
-            var selectors = [
-                '[class*="nppfs"]', '[class*="NPPFS"]',
-                '[id*="nppfs"]', '[id*="NPPFS"]',
-                '[class*="keyboard"]', '[class*="Keyboard"]',
-                '[class*="astx"]', '[class*="ASTx"]',
-                '[class*="touchen"]', '[class*="TouchEn"]',
-                '[class*="nProtect"]', '[class*="nprotect"]',
-                '[class*="initech"]', '[class*="INITECH"]',
-                '[class*="KDefense"]', '[class*="kdefense"]',
-                '[class*="npPfsTarget"]',
-                'div.npPfsTarget',
-                '#nppfs-wrapper',
-                'iframe[src*="security"]',
-                'iframe[src*="nppfs"]',
-                'iframe[src*="touchen"]',
-                'iframe[src*="astx"]'
-            ];
-            selectors.forEach(function(sel) {
-                try {
-                    document.querySelectorAll(sel).forEach(function(el) {
-                        el.style.setProperty('display', 'none', 'important');
-                        el.style.setProperty('visibility', 'hidden', 'important');
-                    });
-                } catch(e) {}
-            });
-            // 우측 하단 고정 위치 소형 요소 제거 (보안 팝업 특성)
-            document.querySelectorAll('div, iframe, object, embed, span').forEach(function(el) {
-                try {
-                    var style = window.getComputedStyle(el);
-                    if (style.position === 'fixed' || style.position === 'absolute') {
-                        var rect = el.getBoundingClientRect();
-                        var vw = window.innerWidth;
-                        var vh = window.innerHeight;
-                        if (rect.left > vw - 400 && rect.top > vh - 300 &&
-                            rect.width < 400 && rect.height < 200 && rect.width > 0) {
-                            el.style.setProperty('display', 'none', 'important');
-                        }
-                    }
-                } catch(e) {}
-            });
+            var nosPop = document.getElementById('nos_pop');
+            if (nosPop && nosPop.offsetParent !== null) {
+                // "오늘하루 그만보기" 체크박스 클릭 후 닫기
+                var chk = nosPop.querySelector('.pop_foot input[type="checkbox"], .pop_foot label');
+                if (chk) chk.click();
+                var closeBtn = nosPop.querySelector('a.btn-close, .pop_foot a');
+                if (closeBtn) closeBtn.click();
+                // 혹시 안 닫혔으면 강제 제거
+                nosPop.style.setProperty('display', 'none', 'important');
+            }
         """)
     except Exception:
         pass
