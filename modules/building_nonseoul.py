@@ -367,14 +367,17 @@ def _hide_security_popups(driver):
     try:
         driver.execute_script("""
             var nosPop = document.getElementById('nos_pop');
-            if (nosPop && nosPop.offsetParent !== null) {
-                // "오늘하루 그만보기" 체크박스 클릭 후 닫기
-                var chk = nosPop.querySelector('.pop_foot input[type="checkbox"], .pop_foot label');
-                if (chk) chk.click();
-                var closeBtn = nosPop.querySelector('a.btn-close, .pop_foot a');
-                if (closeBtn) closeBtn.click();
-                // 혹시 안 닫혔으면 강제 제거
-                nosPop.style.setProperty('display', 'none', 'important');
+            if (nosPop) {
+                // "오늘하루 그만보기" 체크박스 체크
+                var chks = nosPop.querySelectorAll('input[type="checkbox"]');
+                chks.forEach(function(c) { if (!c.checked) c.click(); });
+                // 닫기 버튼 클릭
+                var btns = nosPop.querySelectorAll('a, button');
+                btns.forEach(function(b) {
+                    if (b.textContent.indexOf('닫기') >= 0) b.click();
+                });
+                // 강제 제거
+                nosPop.remove();
             }
         """)
     except Exception:
