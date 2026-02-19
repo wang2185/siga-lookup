@@ -379,6 +379,26 @@ def _fill_dong_ho(driver, dong_no, ho_no):
                     break
 
 
+def _wait_loading_done(driver, timeout=30):
+    """WeTax 로딩 오버레이('업무데이터 수신중입니다')가 사라질 때까지 대기."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        loading = driver.execute_script("""
+            var overlays = document.querySelectorAll('.loading, .blockUI, [class*="loading"]');
+            for (var i = 0; i < overlays.length; i++) {
+                if (overlays[i].offsetParent !== null ||
+                    window.getComputedStyle(overlays[i]).display !== 'none') {
+                    return true;
+                }
+            }
+            if (document.body.innerText.indexOf('수신중') >= 0) return true;
+            return false;
+        """)
+        if not loading:
+            return
+        time.sleep(1)
+
+
 def _hide_security_popups(driver):
     """키보드 보안 팝업(NOS 등)을 '오늘하루 그만보기'로 닫는다."""
     try:
@@ -413,13 +433,16 @@ def _click_search_and_extract(driver, logs):
                 driver.execute_script("arguments[0].click();", btn)
                 break
 
-    time.sleep(5)
+    time.sleep(3)
 
     try:
         alert = driver.switch_to.alert
         alert.accept()
     except Exception:
         pass
+
+    # 로딩 오버레이("업무데이터 수신중입니다") 완료 대기
+    _wait_loading_done(driver, timeout=30)
 
     results = _extract_all_results(driver)
     logs.append(f"결과 {len(results)}건 수집")
