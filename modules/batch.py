@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 _UPLOAD_CACHE_DIR = os.path.join(tempfile.gettempdir(), "siga_upload_cache")
 os.makedirs(_UPLOAD_CACHE_DIR, exist_ok=True)
 
-_ADDR_SPLIT_RE = re.compile(r'[\n;]+')
+_ADDR_SPLIT_RE = re.compile(r'\n+')
 _SHARE_FRAC_RE = re.compile(r'(\d+)\s*/\s*(\d+)')  # 1/2, 3/10
 _SHARE_PCT_RE = re.compile(r'([\d.]+)\s*%')  # 50%, 33.33%
 
@@ -176,7 +176,7 @@ def _cleanup_jobs(keep_id: str = ""):
 # ─── 주소 분리 ───
 
 def split_addresses(text: str) -> list[str]:
-    """셀 내 복수 주소를 줄바꿈/쉼표/세미콜론으로 분리한다."""
+    """셀 내 복수 주소를 줄바꿈으로 분리한다."""
     parts = _ADDR_SPLIT_RE.split(text)
     cleaned = [p.strip() for p in parts if p.strip()]
     return cleaned if cleaned else [text.strip()]
