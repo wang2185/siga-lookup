@@ -27,7 +27,7 @@
       const extraFields = document.getElementById('extraFields');
       const etaxFields = document.getElementById('etaxFields');
       const type = radio ? radio.value : '';
-      const needsDongHo = ['building', 'factory', 'apartment'].includes(type);
+      const needsDongHo = ['building', 'apartment'].includes(type);
       const needsEtax = type === 'building';
 
       if (extraFields) extraFields.className = needsDongHo ? 'extra-fields show' : 'extra-fields';

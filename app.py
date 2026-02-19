@@ -15,7 +15,6 @@ from modules.building_nonseoul import WeTaxModule
 from modules.building_seoul import (
     SeoulETaxModule, get_dong_cache, ETAX_SIGU, ETAX_TSJ,
 )
-from modules.factory import FactoryModule
 from modules.land import LandPriceModule
 from modules.apartment import ApartmentPriceModule
 from modules.house import HousePriceModule
@@ -35,7 +34,6 @@ app.secret_key = Config.SECRET_KEY
 # 모듈 초기화
 wetax_module = WeTaxModule()
 etax_module = SeoulETaxModule()
-factory_module = FactoryModule()
 land_module = LandPriceModule(api_key=Config.VWORLD_API_KEY)
 apartment_module = ApartmentPriceModule(api_key=Config.VWORLD_API_KEY)
 house_module = HousePriceModule(api_key=Config.VWORLD_API_KEY)
@@ -111,7 +109,6 @@ MODULES = {
     "apartment": apartment_module,
     "house": house_module,
     "building": None,  # 서울/비서울 자동 분기
-    "factory": factory_module,
 }
 
 
@@ -503,7 +500,6 @@ def search():
         "apartment": "results/apartment.html",
         "house": "results/house.html",
         "building": "results/building.html",
-        "factory": "results/factory.html",
     }
     template = TEMPLATE_MAP.get(property_type)
     if not template:

@@ -8,7 +8,7 @@ from typing import Optional
 @dataclass
 class LookupResult:
     success: bool
-    property_type: str              # "land", "apartment", "house", "building", "commercial", "factory"
+    property_type: str              # "land", "apartment", "house", "building"
     property_type_label: str        # "토지", "공동주택" 등
     address: str
     year: str
@@ -27,7 +27,6 @@ PROPERTY_TYPES = {
     "apartment":  "공동주택 (공동주택가격)",
     "house":      "개별주택 (개별주택가격)",
     "building":   "주택외건물 (시가표준액)",
-    "factory":    "공장 (시가표준액)",
 }
 
 
@@ -75,14 +74,6 @@ SOURCE_INFO = {
     },
     "building_wetax": {
         "name": "주택외건물 시가표준액",
-        "authority": "행정안전부",
-        "provider": "위택스(WeTax)",
-        "system": "WeTax (wetax.go.kr)",
-        "law": "지방세법 제4조 (시가표준액)",
-        "url": "https://www.wetax.go.kr",
-    },
-    "factory": {
-        "name": "공장 시가표준액",
         "authority": "행정안전부",
         "provider": "위택스(WeTax)",
         "system": "WeTax (wetax.go.kr)",

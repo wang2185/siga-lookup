@@ -38,12 +38,11 @@ class WeTaxModule(BaseLookupModule):
         return "wetax"
 
     def search(self, address: dict, year: str = "", **kwargs) -> LookupResult:
-        building_type = kwargs.get("building_type", "existing")  # "existing" or "factory"
-        result = self._run_search(address, building_type)
+        result = self._run_search(address)
         return LookupResult(
             success=result["success"],
-            property_type=kwargs.get("override_type", self.property_type),
-            property_type_label=kwargs.get("override_label", self.property_type_label),
+            property_type=self.property_type,
+            property_type_label=self.property_type_label,
             address=address.get("_raw", ""),
             year=year,
             results=result["results"],
@@ -55,7 +54,7 @@ class WeTaxModule(BaseLookupModule):
             evidence_type="png" if result.get("evidence") else "",
         )
 
-    def _run_search(self, addr: dict, building_type: str = "existing") -> dict:
+    def _run_search(self, addr: dict) -> dict:
         logs = []
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--headless=new")
@@ -73,21 +72,13 @@ class WeTaxModule(BaseLookupModule):
             logs.append("위택스 페이지 접속 완료")
             _hide_security_popups(driver)
 
-            # 건물 유형 라디오
-            if building_type == "factory":
-                try:
-                    radio = driver.find_element(By.ID, "radio_02_02")
-                    if not radio.is_selected():
-                        _click_radio(driver, "radio_02_02")
-                except NoSuchElementException:
-                    _click_radio_by_label_text(driver, "공장")
-            else:
-                try:
-                    radio = driver.find_element(By.ID, "radio_02_01")
-                    if not radio.is_selected():
-                        _click_radio(driver, "radio_02_01")
-                except NoSuchElementException:
-                    _click_radio_by_label_text(driver, "기존")
+            # 기존건물 라디오 확인
+            try:
+                radio = driver.find_element(By.ID, "radio_02_01")
+                if not radio.is_selected():
+                    _click_radio(driver, "radio_02_01")
+            except NoSuchElementException:
+                _click_radio_by_label_text(driver, "기존")
             time.sleep(1)
 
             # 시/도 (약칭 → 정식 명칭 변환)
