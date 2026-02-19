@@ -432,16 +432,29 @@ _HEADER_KEY_MAP = [
 ]
 
 # WeTax 테이블 ID별 알려진 컬럼 매핑 (헤더 파싱 실패 시 폴백)
+# 컬럼 수별 다중 매핑: WeTax 페이지 상태에 따라 테이블 구조가 달라질 수 있음
 _WETAX_KNOWN_COLUMNS = {
-    "tb_BldsCpbInq": ["_idx", "year", "lot", "dong_no", "ho", "name", "total", "area"],
-    "tb_BldsCpbInqTmp": ["_idx", "year", "lot", "dong_no", "ho", "name", "total", "area"],
-    "tb_hos": ["_idx", "dong_no", "ho", "name", "total", "area"],
-    "tb_mfh": ["_idx", "year", "name", "total"],
+    "tb_BldsCpbInq": {
+        8: ["_idx", "year", "lot", "dong_no", "ho", "name", "total", "area"],
+        3: ["name", "total", "area"],
+    },
+    "tb_BldsCpbInqTmp": {
+        8: ["_idx", "year", "lot", "dong_no", "ho", "name", "total", "area"],
+        3: ["name", "total", "area"],
+    },
+    "tb_hos": {
+        6: ["_idx", "dong_no", "ho", "name", "total", "area"],
+        3: ["name", "total", "area"],
+    },
+    "tb_mfh": {
+        4: ["_idx", "year", "name", "total"],
+        3: ["name", "total", "area"],
+    },
 }
 
 _ERROR_PATTERNS = [
     "존재하지 않습니다", "조회되지 않습니다",
-    "결과가 없습니다", "입력해야 합니다",
+    "결과가 없습니다", "입력해야 합니다", "입력하셔야 합니다",
 ]
 
 
@@ -562,6 +575,19 @@ def _extract_table_rows_by_columns(table, column_keys):
     return rows
 
 
+def _resolve_known_columns(tid, col_count):
+    """테이블 ID와 데이터 컬럼 수에 맞는 알려진 컬럼 매핑을 반환한다."""
+    mappings = _WETAX_KNOWN_COLUMNS.get(tid)
+    if not mappings:
+        return None
+    # 정확한 컬럼 수 매칭 우선
+    if col_count in mappings:
+        return mappings[col_count]
+    # 가장 가까운 매핑 반환
+    closest = min(mappings.keys(), key=lambda k: abs(k - col_count))
+    return mappings[closest]
+
+
 def _extract_all_results(driver):
     """테이블에서 결과를 dict 리스트로 추출한다."""
     results = []
@@ -571,9 +597,24 @@ def _extract_all_results(driver):
             if not table.is_displayed():
                 continue
             rows = _extract_table_rows(table)
-            # 헤더 파싱 실패 시 알려진 컬럼 매핑으로 재시도
-            if not rows and tid in _WETAX_KNOWN_COLUMNS:
-                rows = _extract_table_rows_by_columns(table, _WETAX_KNOWN_COLUMNS[tid])
+            # 헤더 파싱 실패 또는 핵심 키(total) 누락 시 알려진 컬럼 매핑으로 재시도
+            needs_fallback = (
+                not rows
+                or (rows and not any(r.get("total") for r in rows))
+            )
+            if needs_fallback and tid in _WETAX_KNOWN_COLUMNS:
+                # 데이터 컬럼 수 확인
+                col_count = 0
+                for tr in table.find_elements(By.TAG_NAME, "tr"):
+                    tds = tr.find_elements(By.TAG_NAME, "td")
+                    if tds:
+                        col_count = len(tds)
+                        break
+                known_cols = _resolve_known_columns(tid, col_count)
+                if known_cols:
+                    fallback_rows = _extract_table_rows_by_columns(table, known_cols)
+                    if fallback_rows and any(r.get("total") for r in fallback_rows):
+                        rows = fallback_rows
             results.extend(rows)
         except NoSuchElementException:
             continue
