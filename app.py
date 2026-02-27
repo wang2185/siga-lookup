@@ -396,6 +396,9 @@ def search():
             dong_no = address.get("dong_no", "").strip()
         if not ho_no:
             ho_no = address.get("ho_no", "").strip()
+        # WeTax 등 모듈이 addr dict에서 dong_no/ho_no를 읽으므로 반영
+        address["dong_no"] = dong_no
+        address["ho_no"] = ho_no
         app.logger.info(
             "[AUTO] addr=%s pnu=%s dong_no=%r ho_no=%r year=%s",
             address.get("_raw", ""), address.get("pnu", ""), dong_no, ho_no, year,
