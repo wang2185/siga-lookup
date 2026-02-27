@@ -70,6 +70,17 @@ class WeTaxModule(BaseLookupModule):
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_argument("--window-size=1400,900")
 
+        # 서버 환경에서 PATH가 제한적일 수 있으므로 Chrome 바이너리 위치 명시
+        import shutil
+        chrome_bin = shutil.which("google-chrome") or shutil.which("chromium")
+        if not chrome_bin:
+            for p in ("/usr/bin/google-chrome", "/opt/google/chrome/google-chrome", "/snap/bin/chromium"):
+                if os.path.isfile(p):
+                    chrome_bin = p
+                    break
+        if chrome_bin:
+            chrome_options.binary_location = chrome_bin
+
         driver = webdriver.Chrome(options=chrome_options)
         try:
             logs.append("Chrome 브라우저 시작")
