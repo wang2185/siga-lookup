@@ -1,6 +1,8 @@
 """주택외건물 비서울 지역 시가표준액 조회 — WeTax (Selenium)."""
 
 import base64
+import os
+import shutil
 import time
 import traceback
 
@@ -71,7 +73,6 @@ class WeTaxModule(BaseLookupModule):
         chrome_options.add_argument("--window-size=1400,900")
 
         # 서버 환경에서 PATH가 제한적일 수 있으므로 Chrome 바이너리 위치 명시
-        import shutil
         chrome_bin = shutil.which("google-chrome") or shutil.which("chromium")
         if not chrome_bin:
             for p in ("/usr/bin/google-chrome", "/opt/google/chrome/google-chrome", "/snap/bin/chromium"):
@@ -174,7 +175,6 @@ class WeTaxModule(BaseLookupModule):
             time.sleep(0.5)
 
             # 캡차 처리
-            import os
             anticaptcha_key = os.getenv("ANTICAPTCHA_API_KEY", "")
             _solve_captcha_anticaptcha(driver, anticaptcha_key, logs)
             time.sleep(0.5)
