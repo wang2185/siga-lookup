@@ -284,10 +284,8 @@ class WeTaxModule(BaseLookupModule):
             ho_no = addr.get("ho_no", "")
             anticaptcha_key = os.getenv("ANTICAPTCHA_API_KEY", "")
 
-            # 동호 미입력 시: 캡차 1회만 소비 (variation 생성 안 함)
-            # 동호 입력 시: 원본 1회 + 재시도 최대 1회 = 캡차 최대 2회
-            _MAX_CAPTCHA_RETRIES = 2
-
+            # 동호 미입력 → variation 없이 캡차 1회만 소비
+            # 동호 입력 → 모든 variation 시도 (제한 없음)
             if dong_no or ho_no:
                 variations = _generate_dong_ho_variations(dong_no, ho_no)
             else:
@@ -296,10 +294,6 @@ class WeTaxModule(BaseLookupModule):
             evidence = None
 
             for vi, (try_dong, try_ho) in enumerate(variations):
-                if vi >= _MAX_CAPTCHA_RETRIES:
-                    logs.append(f"캡차 비용 제한 ({_MAX_CAPTCHA_RETRIES}회) — 나머지 {len(variations)-vi}건 스킵")
-                    break
-
                 if vi > 0:
                     logs.append(f"동호 변환 재시도 [{vi+1}/{len(variations)}]: 동={try_dong!r} 호={try_ho!r}")
 
@@ -316,7 +310,7 @@ class WeTaxModule(BaseLookupModule):
                         logs.append(f"동호 변환 성공: 동={try_dong!r} 호={try_ho!r}")
                     break
 
-                # "조회되지 않습니다" = 주소 자체가 없으므로 재시도 무의미
+                # "조회되지 않습니다" = 주소 자체가 없으므로 동호만 바꿔도 무의미
                 body_text = driver.find_element(By.TAG_NAME, "body").text
                 if "조회되지 않습니다" in body_text:
                     logs.append("주소 자체 조회 불가 — 동호 변환 중단")
