@@ -284,20 +284,28 @@ class WeTaxModule(BaseLookupModule):
             ho_no = addr.get("ho_no", "")
             anticaptcha_key = os.getenv("ANTICAPTCHA_API_KEY", "")
 
-            variations = _generate_dong_ho_variations(dong_no, ho_no)
-            if not variations:
-                variations = [("", "")]  # 동/호 없이 기본 검색 1회 실행
+            # 동호 미입력 시: 캡차 1회만 소비 (variation 생성 안 함)
+            # 동호 입력 시: 원본 1회 + 재시도 최대 1회 = 캡차 최대 2회
+            _MAX_CAPTCHA_RETRIES = 2
+
+            if dong_no or ho_no:
+                variations = _generate_dong_ho_variations(dong_no, ho_no)
+            else:
+                variations = [("", "")]
             results = []
             evidence = None
 
             for vi, (try_dong, try_ho) in enumerate(variations):
+                if vi >= _MAX_CAPTCHA_RETRIES:
+                    logs.append(f"캡차 비용 제한 ({_MAX_CAPTCHA_RETRIES}회) — 나머지 {len(variations)-vi}건 스킵")
+                    break
+
                 if vi > 0:
                     logs.append(f"동호 변환 재시도 [{vi+1}/{len(variations)}]: 동={try_dong!r} 호={try_ho!r}")
 
                 _fill_dong_ho(driver, try_dong, try_ho)
                 time.sleep(0.2)
 
-                # 매 시도마다 캡차 새로 풀기
                 _solve_captcha_anticaptcha(driver, anticaptcha_key, logs)
                 time.sleep(0.2)
 
@@ -308,15 +316,10 @@ class WeTaxModule(BaseLookupModule):
                         logs.append(f"동호 변환 성공: 동={try_dong!r} 호={try_ho!r}")
                     break
 
-                # 실패 시 body 메시지 확인 — "조회되지 않습니다"는 주소 자체가 없으므로 재시도 무의미
+                # "조회되지 않습니다" = 주소 자체가 없으므로 재시도 무의미
                 body_text = driver.find_element(By.TAG_NAME, "body").text
                 if "조회되지 않습니다" in body_text:
                     logs.append("주소 자체 조회 불가 — 동호 변환 중단")
-                    break
-
-                # 최대 5회까지만 시도 (캡차 비용 절약)
-                if vi >= 4:
-                    logs.append(f"동호 변환 5회 시도 완료 — 중단 (남은 {len(variations)-vi-1}건 스킵)")
                     break
 
             # 테이블에 없는 키를 입력 주소에서 보충
