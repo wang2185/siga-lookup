@@ -322,10 +322,20 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
                 item["_source"] = info.get("source", "")
                 all_results.append(item)
 
+        # 표시용 주소: 동/호가 있으면 포함
+        display_addr = address_str
+        if dong_no or ho_no:
+            parts = []
+            if dong_no:
+                parts.append(f"{dong_no}동")
+            if ho_no:
+                parts.append(f"{ho_no}호")
+            display_addr += " " + " ".join(parts)
+
         return {
             "success": len(all_results) > 0,
             "property_type": "auto",
-            "address": address_str,
+            "address": display_addr,
             "year": year,
             "results": all_results,
             "error": None if all_results else "조회 결과가 없습니다.",
@@ -513,11 +523,23 @@ def search():
                 session["last_evidence_key"] = ekey
                 session["last_evidence_type"] = bldg_result.evidence_type
 
+        # 표시용 주소: 동/호가 있으면 포함
+        display_addr = address.get("_raw", "")
+        if dong_no or ho_no:
+            parts = []
+            if dong_no:
+                parts.append(f"{dong_no}동")
+            if ho_no:
+                parts.append(f"{ho_no}호")
+            display_addr += " " + " ".join(parts)
+
         return render_template(
             "results/auto.html",
             auto_results=auto_results,
-            address=address.get("_raw", ""),
+            address=display_addr,
             year=year,
+            dong_no=dong_no,
+            ho_no=ho_no,
             source_info=SOURCE_INFO,
             show_dong_ho_guide=show_dong_ho_guide,
             apartment_count=len(auto_results["apartment"]["result"].results) if "apartment" in auto_results else 0,
@@ -594,6 +616,17 @@ def search():
     # 캐시 저장 (성공 시)
     if result.success and result.results:
         lookup_cache.set(property_type, address, year, result)
+
+    # 표시용 주소: 동/호가 있으면 포함
+    d_no = request.form.get("dong_no", "").strip() or address.get("dong_no", "")
+    h_no = request.form.get("ho_no", "").strip() or address.get("ho_no", "")
+    if d_no or h_no:
+        parts = []
+        if d_no:
+            parts.append(f"{d_no}동")
+        if h_no:
+            parts.append(f"{h_no}호")
+        result.address = (result.address or "") + " " + " ".join(parts)
 
     session["last_result_key"] = _store_pdf_data(_result_to_dict(result))
 
