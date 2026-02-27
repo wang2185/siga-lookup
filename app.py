@@ -199,9 +199,10 @@ def _resolve_pnu(addr: dict, address_str: str) -> dict:
                 for key in ("pnu", "adm_cd", "bd_mgt_sn", "road_addr", "jibun_addr"):
                     if comp.get(key):
                         addr[key] = comp[key]
-                # sido/sigungu/dong/bonji 보완 (비어 있을 때만)
+                # V-World API가 더 정확하므로 dong/bonji/bunji는 항상 덮어쓰기
+                # (도로명 주소의 경우 parse_address가 도로번호를 bonji로 오파싱)
                 for key in ("sido", "sigungu", "dong", "bonji", "bunji"):
-                    if not addr.get(key) and comp.get(key):
+                    if comp.get(key):
                         addr[key] = comp[key]
                 return addr
 
@@ -219,7 +220,7 @@ def _resolve_pnu(addr: dict, address_str: str) -> dict:
                     if comp.get(key):
                         addr[key] = comp[key]
                 for key in ("sido", "sigungu", "dong", "bonji", "bunji"):
-                    if not addr.get(key) and comp.get(key):
+                    if comp.get(key):
                         addr[key] = comp[key]
                 return addr
 
