@@ -285,6 +285,8 @@ class WeTaxModule(BaseLookupModule):
             anticaptcha_key = os.getenv("ANTICAPTCHA_API_KEY", "")
 
             variations = _generate_dong_ho_variations(dong_no, ho_no)
+            if not variations:
+                variations = [("", "")]  # 동/호 없이 기본 검색 1회 실행
             results = []
             evidence = None
 
