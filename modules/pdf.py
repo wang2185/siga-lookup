@@ -10,7 +10,7 @@ try:
     from weasyprint import HTML
     from weasyprint import default_url_fetcher
     WEASYPRINT_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     WEASYPRINT_AVAILABLE = False
 
 

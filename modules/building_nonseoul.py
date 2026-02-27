@@ -1,8 +1,10 @@
 """주택외건물 비서울 지역 시가표준액 조회 — WeTax (Selenium)."""
 
+import base64
 import time
 import traceback
 
+import requests as _requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
@@ -10,6 +12,10 @@ from selenium.common.exceptions import NoSuchElementException, StaleElementRefer
 from .base import BaseLookupModule, LookupResult
 
 WETAX_URL = "https://www.wetax.go.kr/tcp/loi/J030401M01.do"
+
+# AntiCaptcha API
+_ANTICAPTCHA_URL = "https://api.anti-captcha.com"
+_CAPTCHA_MAX_RETRIES = 3
 
 # 시/도 약칭 → 정식 명칭 매핑 (WeTax 드롭다운은 정식 명칭 사용)
 _SIDO_FULL = {
@@ -69,8 +75,10 @@ class WeTaxModule(BaseLookupModule):
             logs.append("Chrome 브라우저 시작")
             driver.get(WETAX_URL)
             time.sleep(3)
+            _dismiss_alerts(driver)
             logs.append("위택스 페이지 접속 완료")
             _hide_security_popups(driver)
+            _dismiss_alerts(driver)
 
             # 기존건물 라디오 확인
             try:
@@ -80,6 +88,7 @@ class WeTaxModule(BaseLookupModule):
             except NoSuchElementException:
                 _click_radio_by_label_text(driver, "기존")
             time.sleep(1)
+            _dismiss_alerts(driver)
 
             # 시/도 (약칭 → 정식 명칭 변환)
             sido_kw = addr.get("sido", "")
@@ -92,6 +101,7 @@ class WeTaxModule(BaseLookupModule):
                 else:
                     logs.append("시/도 선택 실패")
             time.sleep(2)
+            _dismiss_alerts(driver)
 
             # 시/군/구 — 하위 구가 있으면 우선 사용 (고양시 일산동구 등)
             sigungu_kw = addr.get("sigungu_sub", "") or addr.get("sigungu", "")
@@ -104,12 +114,14 @@ class WeTaxModule(BaseLookupModule):
                 else:
                     logs.append("시/군/구 선택 실패")
             time.sleep(2)
+            _dismiss_alerts(driver)
 
             # 읍/면/동
             logs.append(f"읍/면/동 선택: {addr.get('dong', '')}")
             if not _wait_and_select(driver, "selStdgCd", addr.get("dong", "")):
                 logs.append("읍/면/동 선택 실패")
             time.sleep(1)
+            _dismiss_alerts(driver)
 
             # 기준년도
             _select_first_valid_option(driver, "selCrtrYr")
@@ -148,6 +160,12 @@ class WeTaxModule(BaseLookupModule):
             dong_no = addr.get("dong_no", "")
             ho_no = addr.get("ho_no", "")
             _fill_dong_ho(driver, dong_no, ho_no)
+            time.sleep(0.5)
+
+            # 캡차 처리
+            import os
+            anticaptcha_key = os.getenv("ANTICAPTCHA_API_KEY", "")
+            _solve_captcha_anticaptcha(driver, anticaptcha_key, logs)
             time.sleep(0.5)
 
             # 검색 실행 및 결과 수집
@@ -206,6 +224,7 @@ class WeTaxModule(BaseLookupModule):
 def _wait_and_select(driver, select_id, keyword, timeout=12):
     deadline = time.time() + timeout
     while time.time() < deadline:
+        _dismiss_alerts(driver)
         try:
             el = driver.find_element(By.ID, select_id)
             for opt in el.find_elements(By.TAG_NAME, "option"):
@@ -219,7 +238,7 @@ def _wait_and_select(driver, select_id, keyword, timeout=12):
                         select_id, value,
                     )
                     return True
-        except StaleElementReferenceException:
+        except (StaleElementReferenceException, NoSuchElementException):
             pass
         time.sleep(0.5)
     return False
@@ -390,23 +409,190 @@ def _wait_loading_done(driver, timeout=30):
         time.sleep(1)
 
 
+def _solve_captcha_anticaptcha(driver, api_key, logs):
+    """WeTax 캡차 이미지를 AntiCaptcha로 풀어서 입력한다."""
+    if not api_key:
+        logs.append("ANTICAPTCHA_API_KEY 미설정 — 캡차 미처리")
+        return False
+
+    # 캡차 이미지를 base64로 추출
+    captcha_b64 = driver.execute_script("""
+        var imgs = document.querySelectorAll('img');
+        for (var i = 0; i < imgs.length; i++) {
+            var src = imgs[i].src || '';
+            var id = imgs[i].id || '';
+            var alt = imgs[i].alt || '';
+            if (src.indexOf('captcha') >= 0 || id.indexOf('captcha') >= 0 ||
+                alt.indexOf('자동입력') >= 0 || alt.indexOf('보안') >= 0 ||
+                src.indexOf('captchaImg') >= 0) {
+                var canvas = document.createElement('canvas');
+                canvas.width = imgs[i].naturalWidth || imgs[i].width;
+                canvas.height = imgs[i].naturalHeight || imgs[i].height;
+                var ctx = canvas.getContext('2d');
+                ctx.drawImage(imgs[i], 0, 0);
+                return canvas.toDataURL('image/png').replace(/^data:image\\/png;base64,/, '');
+            }
+        }
+        // 폴백: 캡차 입력란 근처의 이미지
+        var captchaInput = document.querySelector(
+            'input[title*="자동입력"], input[title*="보안문자"], input[id*="captcha"]'
+        );
+        if (captchaInput) {
+            var parent = captchaInput.closest('tr, div, td');
+            if (parent) {
+                var img = parent.querySelector('img');
+                if (img && img.naturalWidth > 50) {
+                    var c2 = document.createElement('canvas');
+                    c2.width = img.naturalWidth || img.width;
+                    c2.height = img.naturalHeight || img.height;
+                    c2.getContext('2d').drawImage(img, 0, 0);
+                    return c2.toDataURL('image/png').replace(/^data:image\\/png;base64,/, '');
+                }
+            }
+        }
+        return null;
+    """)
+
+    if not captcha_b64:
+        logs.append("캡차 이미지를 찾을 수 없음")
+        return False
+
+    logs.append("캡차 이미지 추출 완료")
+
+    # AntiCaptcha에 제출
+    for attempt in range(_CAPTCHA_MAX_RETRIES):
+        try:
+            resp = _requests.post(f"{_ANTICAPTCHA_URL}/createTask", json={
+                "clientKey": api_key,
+                "task": {
+                    "type": "ImageToTextTask",
+                    "body": captcha_b64,
+                    "phrase": False,
+                    "case": False,
+                    "numeric": 1,
+                    "math": False,
+                    "minLength": 4,
+                    "maxLength": 6,
+                },
+                "languagePool": "en",
+            }, timeout=10)
+            data = resp.json()
+
+            if data.get("errorCode") == "ERROR_NO_SLOT_AVAILABLE":
+                time.sleep(3 + attempt * 2)
+                continue
+
+            task_id = data.get("taskId")
+            if not task_id:
+                logs.append(f"캡차 태스크 생성 실패: {data.get('errorDescription', '')}")
+                return False
+            break
+        except Exception as e:
+            logs.append(f"AntiCaptcha 요청 실패: {e}")
+            return False
+    else:
+        logs.append("AntiCaptcha 슬롯 부족 — 재시도 소진")
+        return False
+
+    # 결과 대기 (최대 60초)
+    answer = None
+    for _ in range(30):
+        time.sleep(2)
+        try:
+            resp = _requests.post(f"{_ANTICAPTCHA_URL}/getTaskResult", json={
+                "clientKey": api_key,
+                "taskId": task_id,
+            }, timeout=10)
+            result = resp.json()
+            if result.get("status") == "processing":
+                continue
+            if result.get("status") == "ready":
+                answer = result.get("solution", {}).get("text", "")
+                break
+            logs.append(f"캡차 풀기 오류: {result.get('errorDescription', '')}")
+            return False
+        except Exception:
+            continue
+
+    if not answer:
+        logs.append("캡차 풀기 타임아웃")
+        return False
+
+    logs.append(f"캡차 답: {answer}")
+
+    # 캡차 입력란에 답 입력
+    filled = driver.execute_script("""
+        var inputs = document.querySelectorAll('input[type="text"]');
+        for (var i = 0; i < inputs.length; i++) {
+            var inp = inputs[i];
+            var title = (inp.title || '').toLowerCase();
+            var id = (inp.id || '').toLowerCase();
+            var name = (inp.name || '').toLowerCase();
+            var ph = (inp.placeholder || '').toLowerCase();
+            if (title.indexOf('자동입력') >= 0 || title.indexOf('보안문자') >= 0 ||
+                id.indexOf('captcha') >= 0 || name.indexOf('captcha') >= 0 ||
+                ph.indexOf('자동입력') >= 0 || ph.indexOf('보안') >= 0) {
+                inp.value = '';
+                inp.focus();
+                inp.value = arguments[0];
+                inp.dispatchEvent(new Event('input', {bubbles:true}));
+                inp.dispatchEvent(new Event('change', {bubbles:true}));
+                return true;
+            }
+        }
+        // 폴백: 캡차 이미지 근처의 빈 입력란
+        var captchaSection = document.querySelector(
+            'img[src*="captcha"], img[id*="captcha"]'
+        );
+        if (captchaSection) {
+            var parent = captchaSection.closest('tr, div, td, table');
+            if (parent) {
+                var inp = parent.querySelector('input[type="text"]');
+                if (inp) {
+                    inp.value = arguments[0];
+                    inp.dispatchEvent(new Event('input', {bubbles:true}));
+                    return true;
+                }
+            }
+        }
+        return false;
+    """, answer)
+
+    if filled:
+        logs.append("캡차 입력 완료")
+    else:
+        logs.append("캡차 입력란을 찾을 수 없음")
+    return filled
+
+
+def _dismiss_alerts(driver):
+    """JavaScript alert가 있으면 모두 닫는다 (보안프로그램 설치 등).
+
+    보안프로그램 설치 alert는 '확인' 시 설치페이지로 이동하므로
+    dismiss(취소)로 닫아야 현재 페이지를 유지할 수 있다.
+    """
+    for _ in range(3):
+        try:
+            alert = driver.switch_to.alert
+            alert.dismiss()
+            time.sleep(0.3)
+        except Exception:
+            break
+
+
 def _hide_security_popups(driver):
-    """키보드 보안 팝업(NOS 등)을 '오늘하루 그만보기'로 닫는다."""
+    """키보드 보안 팝업(NOS 등)을 DOM에서 직접 제거한다.
+
+    X 버튼 클릭 시 보안프로그램 설치 JS alert가 트리거되어
+    페이지를 깨뜨리므로, 버튼을 클릭하지 않고 DOM 제거만 수행한다.
+    """
     try:
         driver.execute_script("""
             var nosPop = document.getElementById('nos_pop');
-            if (nosPop) {
-                // "오늘하루 그만보기" 체크박스 체크
-                var chks = nosPop.querySelectorAll('input[type="checkbox"]');
-                chks.forEach(function(c) { if (!c.checked) c.click(); });
-                // 닫기 버튼 클릭
-                var btns = nosPop.querySelectorAll('a, button');
-                btns.forEach(function(b) {
-                    if (b.textContent.indexOf('닫기') >= 0) b.click();
-                });
-                // 강제 제거
-                nosPop.remove();
-            }
+            if (nosPop) nosPop.remove();
+            // 배경 오버레이도 제거
+            var overlays = document.querySelectorAll('.pop_bg, .dim_layer');
+            overlays.forEach(function(o) { o.remove(); });
         """)
     except Exception:
         pass
