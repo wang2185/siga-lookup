@@ -221,6 +221,7 @@
     <a href="/" class="btn btn-secondary">다시 조회</a>
     {% if auto_results %}
     <form method="POST" action="/download/auto-pdf" style="flex:1;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div style="display:flex;gap:8px;align-items:center;">
         <input type="text" name="filename" placeholder="파일명 (선택)" class="pdf-filename-input" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:0.85rem;">
         <button type="submit" class="btn btn-download">PDF 다운로드</button>
@@ -229,6 +230,7 @@
     {% endif %}
     {% if has_evidence %}
     <form method="POST" action="/download/evidence" style="flex:0;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-secondary" title="조회 출처 원본 증거 다운로드">원본 증거</button>
     </form>
     {% endif %}

@@ -11,6 +11,7 @@
   {% endif %}
 
   <form method="POST" action="/search" id="searchForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <!-- 부동산 유형 선택 -->
     <div class="form-group">
       <label>부동산 유형 <span style="font-size:0.8rem;color:#64748b;font-weight:400;">(선택하지 않으면 토지/주택 자동 조회)</span></label>
