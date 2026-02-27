@@ -339,6 +339,8 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
             "success": len(all_results) > 0,
             "property_type": "auto",
             "address": _display_address(address_str, dong_no, ho_no),
+            "road_addr": _display_address(addr.get("road_addr", ""), dong_no, ho_no),
+            "jibun_addr": _display_address(addr.get("jibun_addr", ""), dong_no, ho_no),
             "year": year,
             "results": all_results,
             "error": None if all_results else "조회 결과가 없습니다.",
@@ -530,6 +532,8 @@ def search():
             "results/auto.html",
             auto_results=auto_results,
             address=_display_address(address.get("_raw", ""), dong_no, ho_no),
+            road_addr=_display_address(address.get("road_addr", ""), dong_no, ho_no),
+            jibun_addr=_display_address(address.get("jibun_addr", ""), dong_no, ho_no),
             year=year,
             dong_no=dong_no,
             ho_no=ho_no,
@@ -575,13 +579,18 @@ def search():
     d_no = request.form.get("dong_no", "").strip() or address.get("dong_no", "")
     h_no = request.form.get("ho_no", "").strip() or address.get("ho_no", "")
 
+    road = address.get("road_addr", "")
+    jibun = address.get("jibun_addr", "")
+
     cached = lookup_cache.get(property_type, address, year)
     if cached:
         cached.cached = True
         session["last_result_key"] = _store_pdf_data(_result_to_dict(cached))
         return render_template(template, result=cached, source_info=src_info,
                                has_evidence=False,
-                               display_address=_display_address(cached.address, d_no, h_no))
+                               display_address=_display_address(cached.address, d_no, h_no),
+                               road_addr=_display_address(road, d_no, h_no),
+                               jibun_addr=_display_address(jibun, d_no, h_no))
 
     # ETAX용 추가 파라미터
     kwargs = {}
@@ -633,7 +642,9 @@ def search():
 
     return render_template(template, result=result, source_info=src_info,
                            has_evidence=has_evidence,
-                           display_address=display_addr)
+                           display_address=display_addr,
+                           road_addr=_display_address(road, d_no, h_no),
+                           jibun_addr=_display_address(jibun, d_no, h_no))
 
 
 # ─── PDF 다운로드 ───
