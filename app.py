@@ -230,6 +230,19 @@ def _resolve_pnu(addr: dict, address_str: str) -> dict:
     return addr
 
 
+def _display_address(base: str, dong_no: str = "", ho_no: str = "") -> str:
+    """주소에 동/호 정보를 붙여 표시용 문자열을 만든다."""
+    addr = (base or "").strip()
+    parts = []
+    if dong_no:
+        parts.append(f"{dong_no}동")
+    if ho_no:
+        parts.append(f"{ho_no}호")
+    if parts:
+        addr += " " + " ".join(parts)
+    return addr
+
+
 def perform_search(address_str: str, property_type: str = "", year: str = "",
                    dong_no: str = "", ho_no: str = "") -> dict:
     """Core search logic for JSON API.
@@ -322,20 +335,10 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
                 item["_source"] = info.get("source", "")
                 all_results.append(item)
 
-        # 표시용 주소: 동/호가 있으면 포함
-        display_addr = address_str
-        if dong_no or ho_no:
-            parts = []
-            if dong_no:
-                parts.append(f"{dong_no}동")
-            if ho_no:
-                parts.append(f"{ho_no}호")
-            display_addr += " " + " ".join(parts)
-
         return {
             "success": len(all_results) > 0,
             "property_type": "auto",
-            "address": display_addr,
+            "address": _display_address(address_str, dong_no, ho_no),
             "year": year,
             "results": all_results,
             "error": None if all_results else "조회 결과가 없습니다.",
@@ -523,20 +526,10 @@ def search():
                 session["last_evidence_key"] = ekey
                 session["last_evidence_type"] = bldg_result.evidence_type
 
-        # 표시용 주소: 동/호가 있으면 포함
-        display_addr = address.get("_raw", "")
-        if dong_no or ho_no:
-            parts = []
-            if dong_no:
-                parts.append(f"{dong_no}동")
-            if ho_no:
-                parts.append(f"{ho_no}호")
-            display_addr += " " + " ".join(parts)
-
         return render_template(
             "results/auto.html",
             auto_results=auto_results,
-            address=display_addr,
+            address=_display_address(address.get("_raw", ""), dong_no, ho_no),
             year=year,
             dong_no=dong_no,
             ho_no=ho_no,
@@ -578,12 +571,17 @@ def search():
         )
     else:
         src_info = SOURCE_INFO.get(property_type, {})
+    # 개별 조회 동/호 (캐시 경로에서도 사용)
+    d_no = request.form.get("dong_no", "").strip() or address.get("dong_no", "")
+    h_no = request.form.get("ho_no", "").strip() or address.get("ho_no", "")
+
     cached = lookup_cache.get(property_type, address, year)
     if cached:
         cached.cached = True
         session["last_result_key"] = _store_pdf_data(_result_to_dict(cached))
         return render_template(template, result=cached, source_info=src_info,
-                               has_evidence=False)
+                               has_evidence=False,
+                               display_address=_display_address(cached.address, d_no, h_no))
 
     # ETAX용 추가 파라미터
     kwargs = {}
@@ -617,18 +615,13 @@ def search():
     if result.success and result.results:
         lookup_cache.set(property_type, address, year, result)
 
-    # 표시용 주소: 동/호가 있으면 포함
-    d_no = request.form.get("dong_no", "").strip() or address.get("dong_no", "")
-    h_no = request.form.get("ho_no", "").strip() or address.get("ho_no", "")
-    if d_no or h_no:
-        parts = []
-        if d_no:
-            parts.append(f"{d_no}동")
-        if h_no:
-            parts.append(f"{h_no}호")
-        result.address = (result.address or "") + " " + " ".join(parts)
+    # 표시용 주소 (캐시 오염 방지: result.address를 직접 수정하지 않음)
+    display_addr = _display_address(result.address, d_no, h_no)
 
-    session["last_result_key"] = _store_pdf_data(_result_to_dict(result))
+    # PDF용 데이터에는 표시용 주소 사용
+    pdf_dict = _result_to_dict(result)
+    pdf_dict["address"] = display_addr
+    session["last_result_key"] = _store_pdf_data(pdf_dict)
 
     # 건물 조회 증거 저장
     has_evidence = False
@@ -639,7 +632,8 @@ def search():
         has_evidence = True
 
     return render_template(template, result=result, source_info=src_info,
-                           has_evidence=has_evidence)
+                           has_evidence=has_evidence,
+                           display_address=display_addr)
 
 
 # ─── PDF 다운로드 ───
