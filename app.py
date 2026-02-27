@@ -241,6 +241,9 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
         dong_no = addr.get("dong_no", "")
     if not ho_no:
         ho_no = addr.get("ho_no", "")
+    # WeTax 등 모듈이 addr dict에서 dong_no/ho_no를 읽으므로 반영
+    addr["dong_no"] = dong_no
+    addr["ho_no"] = ho_no
 
     # PNU 자동 보정: parse_address만으로는 PNU가 없으므로 주소 검색 API로 보완
     addr = _resolve_pnu(addr, address_str)
