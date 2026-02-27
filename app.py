@@ -3,6 +3,8 @@
 Flask + 모듈별 조회 (WeTax/ETAX/data.go.kr/HomeTax)
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from flask import Flask, render_template, request, jsonify, session, send_file
 from flask_login import login_required
 from flask_session import Session
@@ -256,6 +258,8 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
         is_collective = bool(dong_no or ho_no)
         is_officetel = addr.get("building_type_hint") == "오피스텔"
 
+        # 병렬 실행할 작업 목록 구성
+        tasks = []
         for type_key, mod, label in [
             ("land", land_module, "토지 개별공시지가"),
             ("apartment", apartment_module, "공동주택 공시가격"),
@@ -265,50 +269,50 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
                 continue
             if type_key == "apartment" and is_officetel:
                 continue
-            try:
-                result = mod.search(addr, year)
-                if result.success and result.results:
-                    items = result.results
-                    if type_key == "apartment" and (dong_no or ho_no):
-                        items = filter_apartment_by_dong_ho(items, dong_no, ho_no)
-                    if items:
-                        auto_results[type_key] = {
-                            "label": label,
-                            "results": items,
-                            "source": result.source,
-                            "property_type": result.property_type,
-                        }
-            except Exception as exc:
-                app.logger.error("[API-AUTO] %s exception: %s", type_key, exc)
+            tasks.append((type_key, mod, label, {}))
 
         # 주택외건물: 서울(ETAX) / 비서울(WeTax)
         sido = addr.get("sido", "")
         if sido in ("서울", "서울특별시"):
-            try:
-                kw = {"dong_no": dong_no, "ho_no": ho_no}
-                result = etax_module.search(addr, year, **kw)
-                if result.success and result.results:
-                    auto_results["building"] = {
-                        "label": "주택외건물 시가표준액 (서울)",
-                        "results": result.results,
-                        "source": result.source,
-                        "property_type": result.property_type,
-                    }
-            except Exception:
-                pass
+            tasks.append(("building", etax_module,
+                          "주택외건물 시가표준액 (서울)",
+                          {"dong_no": dong_no, "ho_no": ho_no}))
         else:
-            try:
-                result = wetax_module.search(addr, year)
-                if result.success and result.results:
-                    # WeTax는 폼에서 이미 동/호 필터링됨 → 추가 필터 불필요
-                    auto_results["building"] = {
-                        "label": "주택외건물 시가표준액 (WeTax)",
-                        "results": result.results,
-                        "source": result.source,
-                        "property_type": result.property_type,
-                    }
-            except Exception as exc:
-                app.logger.error("[API-AUTO] wetax exception: %s", exc)
+            tasks.append(("building", wetax_module,
+                          "주택외건물 시가표준액 (WeTax)", {}))
+
+        def _run_api_search(type_key, mod, label, kw):
+            cached = lookup_cache.get(type_key, addr, year)
+            if cached:
+                cached.cached = True
+                return type_key, label, cached
+            result = mod.search(addr, year, **kw)
+            if result.success and result.results:
+                lookup_cache.set(type_key, addr, year, result)
+            return type_key, label, result
+
+        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+            futures = {
+                executor.submit(_run_api_search, tk, m, lb, kw): tk
+                for tk, m, lb, kw in tasks
+            }
+            for future in as_completed(futures):
+                type_key = futures[future]
+                try:
+                    tk, label, result = future.result()
+                    if result.success and result.results:
+                        items = result.results
+                        if tk == "apartment" and (dong_no or ho_no):
+                            items = filter_apartment_by_dong_ho(items, dong_no, ho_no)
+                        if items:
+                            auto_results[tk] = {
+                                "label": label,
+                                "results": items,
+                                "source": result.source,
+                                "property_type": result.property_type,
+                            }
+                except Exception as exc:
+                    app.logger.error("[API-AUTO] %s exception: %s", type_key, exc)
 
         all_results = []
         for type_key, info in auto_results.items():
@@ -414,6 +418,8 @@ def search():
         # 오피스텔: 공동주택이 아니므로 공동주택 공시가격 조회 생략
         is_officetel = address.get("building_type_hint") == "오피스텔"
 
+        # 병렬 실행할 작업 목록 구성
+        search_tasks = []
         for type_key, module, label in [
             ("land", land_module, "토지 개별공시지가"),
             ("apartment", apartment_module, "공동주택 공시가격"),
@@ -423,56 +429,60 @@ def search():
                 continue
             if type_key == "apartment" and is_officetel:
                 continue
-            try:
-                result = module.search(address, year)
-                app.logger.info(
-                    "[AUTO] %s: success=%s count=%d err=%s",
-                    type_key, result.success, len(result.results), result.error,
-                )
-                if result.success and result.results:
-                    # 공동주택: 동/호 필터링 (단계적 — 동 → 호)
-                    if type_key == "apartment" and (dong_no or ho_no):
-                        result.results = filter_apartment_by_dong_ho(
-                            result.results, dong_no, ho_no)
-                        app.logger.info(
-                            "[AUTO] apartment filter: dong=%r ho=%r -> %d results",
-                            dong_no, ho_no, len(result.results),
-                        )
-                    # 필터 후 결과가 있을 때만 추가
-                    if result.results:
-                        auto_results[type_key] = {
-                            "label": label,
-                            "result": result,
-                        }
-            except Exception as exc:
-                app.logger.error("[AUTO] %s exception: %s", type_key, exc)
+            search_tasks.append((type_key, module, label, None, {}))
 
         # 주택외건물 조회: 서울(ETAX) / 비서울(WeTax) 모두 시도
         sido = address.get("sido", "")
         if sido in ("서울", "서울특별시"):
-            try:
-                kwargs = {"dong_no": dong_no, "ho_no": ho_no}
-                result = etax_module.search(address, year, **kwargs)
-                if result.success and result.results:
-                    auto_results["building"] = {
-                        "label": "주택외건물 시가표준액 (서울)",
-                        "result": result,
-                        "source_key": "building_etax",
-                    }
-            except Exception:
-                pass
+            search_tasks.append(("building", etax_module,
+                                 "주택외건물 시가표준액 (서울)",
+                                 "building_etax",
+                                 {"dong_no": dong_no, "ho_no": ho_no}))
         else:
-            # 비서울: WeTax로 주택외건물 조회 (폼에서 이미 동/호 필터됨)
-            try:
-                result = wetax_module.search(address, year)
-                if result.success and result.results:
-                    auto_results["building"] = {
-                        "label": "주택외건물 시가표준액 (WeTax)",
-                        "result": result,
-                        "source_key": "building_wetax",
-                    }
-            except Exception as exc:
-                app.logger.error("[AUTO] wetax exception: %s", exc)
+            search_tasks.append(("building", wetax_module,
+                                 "주택외건물 시가표준액 (WeTax)",
+                                 "building_wetax", {}))
+
+        def _run_search_task(type_key, mod, label, source_key, kw):
+            cached = lookup_cache.get(type_key, address, year)
+            if cached:
+                cached.cached = True
+                return type_key, label, source_key, cached
+            result = mod.search(address, year, **kw)
+            if result.success and result.results:
+                lookup_cache.set(type_key, address, year, result)
+            return type_key, label, source_key, result
+
+        with ThreadPoolExecutor(max_workers=len(search_tasks)) as executor:
+            futures = {
+                executor.submit(_run_search_task, tk, m, lb, sk, kw): tk
+                for tk, m, lb, sk, kw in search_tasks
+            }
+            for future in as_completed(futures):
+                type_key = futures[future]
+                try:
+                    tk, label, source_key, result = future.result()
+                    app.logger.info(
+                        "[AUTO] %s: success=%s count=%d err=%s",
+                        tk, result.success, len(result.results), result.error,
+                    )
+                    if result.success and result.results:
+                        # 공동주택: 동/호 필터링 (단계적 — 동 → 호)
+                        if tk == "apartment" and (dong_no or ho_no):
+                            result.results = filter_apartment_by_dong_ho(
+                                result.results, dong_no, ho_no)
+                            app.logger.info(
+                                "[AUTO] apartment filter: dong=%r ho=%r -> %d results",
+                                dong_no, ho_no, len(result.results),
+                            )
+                        # 필터 후 결과가 있을 때만 추가
+                        if result.results:
+                            entry = {"label": label, "result": result}
+                            if source_key:
+                                entry["source_key"] = source_key
+                            auto_results[tk] = entry
+                except Exception as exc:
+                    app.logger.error("[AUTO] %s exception: %s", type_key, exc)
 
         # 공동주택 결과가 많고 동/호 미입력 시 안내 플래그
         show_dong_ho_guide = False

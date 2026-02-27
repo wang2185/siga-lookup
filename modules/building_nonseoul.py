@@ -2,6 +2,7 @@
 
 import base64
 import os
+import re
 import shutil
 import time
 import traceback
@@ -29,6 +30,116 @@ _SIDO_FULL = {
     "전북": "전북특별자치도", "전남": "전라남도",
     "경북": "경상북도", "경남": "경상남도", "제주": "제주특별자치도",
 }
+
+# 한글 → 영문 알파벳 매핑 (동호수 변환용)
+_KOR_TO_ALPHA = {
+    '에이': 'A', '비': 'B', '씨': 'C', '디': 'D',
+    '이': 'E', '에프': 'F', '지': 'G', '에이치': 'H',
+    '아이': 'I', '제이': 'J', '케이': 'K', '엘': 'L',
+    '엠': 'M', '엔': 'N', '오': 'O', '피': 'P',
+    '큐': 'Q', '알': 'R', '아르': 'R', '에스': 'S',
+    '티': 'T', '유': 'U', '브이': 'V', '더블유': 'W',
+    '엑스': 'X', '와이': 'Y', '제트': 'Z',
+}
+_ALPHA_TO_KOR = {v: k for k, v in _KOR_TO_ALPHA.items() if k != '아르'}
+
+
+def _generate_dong_ho_variations(dong_no: str, ho_no: str) -> list:
+    """동호수의 다양한 해석 조합을 생성한다.
+
+    예: dong=씨, ho=1000 → [(씨,1000), (C,1000), (,C1000), (,씨1000)]
+        dong=B, ho=2423 → [(B,2423), (비,2423), (,B2423), (,B-2423)]
+        dong=에이, ho=502 → [(에이,502), (A,502), (,A502)]
+        dong=101, ho=4304 → [(101,4304), (,101-4304)]
+        dong=, ho=B-2423 → [(,B-2423), (B,2423), (비,2423)]
+    """
+    seen = set()
+    variations = []
+
+    def _add(d, h):
+        key = (str(d).strip(), str(h).strip())
+        if key not in seen and (key[0] or key[1]):
+            seen.add(key)
+            variations.append(key)
+
+    dong = str(dong_no or "").strip()
+    ho = str(ho_no or "").strip()
+
+    # 0) 원본 그대로
+    _add(dong, ho)
+
+    # 1) 한글동 → 영문 변환 (에이→A, 비→B, 씨→C ...)
+    if dong:
+        alpha = _KOR_TO_ALPHA.get(dong)
+        if alpha:
+            _add(alpha, ho)
+            _add("", alpha + ho)  # 합쳐서 호에
+        kor = _ALPHA_TO_KOR.get(dong.upper())
+        if kor:
+            _add(kor, ho)
+            _add("", kor + ho)
+
+    # 2) ho에 영문 접두어: ho=B239 or B-239 → dong=B, ho=239
+    if ho:
+        m = re.match(r'^([A-Za-z])[-]?(\d+)$', ho)
+        if m:
+            letter, num = m.group(1).upper(), m.group(2)
+            _add(letter, num)
+            kor = _ALPHA_TO_KOR.get(letter)
+            if kor:
+                _add(kor, num)
+            _add("", letter + num)
+            _add("", ho)
+
+    # 3) ho에 한글 접두어: ho=씨1000 → dong=씨, ho=1000 / dong=C, ho=1000
+    if ho:
+        m = re.match(r'^([가-힣]{1,4})(\d+)$', ho)
+        if m:
+            kor_part, num = m.group(1), m.group(2)
+            _add(kor_part, num)
+            alpha = _KOR_TO_ALPHA.get(kor_part)
+            if alpha:
+                _add(alpha, num)
+                _add("", alpha + num)
+
+    # 4) dong+ho 합산: dong=101, ho=4304 → 호에 "101-4304"
+    if dong and ho and dong.isdigit() and ho.isdigit():
+        _add("", f"{dong}-{ho}")
+
+    # 5) dong 비어있고 ho에 하이픈: ho=B-2423 → dong=B, ho=2423
+    if not dong and ho and "-" in ho:
+        parts = ho.split("-", 1)
+        _add(parts[0], parts[1])
+        if re.match(r'^[A-Za-z]$', parts[0]):
+            letter = parts[0].upper()
+            _add(letter, parts[1])
+            kor = _ALPHA_TO_KOR.get(letter)
+            if kor:
+                _add(kor, parts[1])
+        elif parts[0] in _KOR_TO_ALPHA:
+            _add(_KOR_TO_ALPHA[parts[0]], parts[1])
+
+    # 6) dong만 있고 ho 없는 경우: dong을 ho로 이동
+    if dong and not ho:
+        _add("", dong)
+        _add("1", dong)
+
+    # 7) ho 선행 0 제거/추가
+    if ho and ho.isdigit():
+        stripped = ho.lstrip('0') or '0'
+        _add(dong, stripped)
+        if len(ho) < 4:
+            _add(dong, ho.zfill(4))
+
+    # 8) dong 없이 ho만
+    if dong and ho:
+        _add("", ho)
+
+    # 9) 동=1로 시도
+    if ho and dong != "1":
+        _add("1", ho)
+
+    return variations
 
 
 class WeTaxModule(BaseLookupModule):
@@ -86,7 +197,7 @@ class WeTaxModule(BaseLookupModule):
         try:
             logs.append("Chrome 브라우저 시작")
             driver.get(WETAX_URL)
-            time.sleep(3)
+            time.sleep(1.5)
             _dismiss_alerts(driver)
             logs.append("위택스 페이지 접속 완료")
             _hide_security_popups(driver)
@@ -99,7 +210,7 @@ class WeTaxModule(BaseLookupModule):
                     _click_radio(driver, "radio_02_01")
             except NoSuchElementException:
                 _click_radio_by_label_text(driver, "기존")
-            time.sleep(1)
+            time.sleep(0.3)
             _dismiss_alerts(driver)
 
             # 시/도 (약칭 → 정식 명칭 변환)
@@ -112,7 +223,7 @@ class WeTaxModule(BaseLookupModule):
                     _wait_and_select(driver, "selUpLgvCd", sido_kw)
                 else:
                     logs.append("시/도 선택 실패")
-            time.sleep(2)
+            time.sleep(1)
             _dismiss_alerts(driver)
 
             # 시/군/구 — 하위 구가 있으면 우선 사용 (고양시 일산동구 등)
@@ -125,27 +236,27 @@ class WeTaxModule(BaseLookupModule):
                     _wait_and_select(driver, "selLgvCd", addr["sigungu"])
                 else:
                     logs.append("시/군/구 선택 실패")
-            time.sleep(2)
+            time.sleep(1)
             _dismiss_alerts(driver)
 
             # 읍/면/동
             logs.append(f"읍/면/동 선택: {addr.get('dong', '')}")
             if not _wait_and_select(driver, "selStdgCd", addr.get("dong", "")):
                 logs.append("읍/면/동 선택 실패")
-            time.sleep(1)
+            time.sleep(0.5)
             _dismiss_alerts(driver)
 
             # 기준년도
             _select_first_valid_option(driver, "selCrtrYr")
             selected_year = _get_selected_text(driver, "selCrtrYr")
-            time.sleep(0.5)
+            time.sleep(0.2)
 
             # 특수번지
             if addr.get("san"):
                 _select_option_containing(driver, "selExstSpeLotno", "산")
             else:
                 _select_first_valid_option(driver, "selExstSpeLotno")
-            time.sleep(0.5)
+            time.sleep(0.2)
 
             # 본번지
             logs.append(f"본번지 입력: {addr.get('bonji', '')}")
@@ -168,28 +279,43 @@ class WeTaxModule(BaseLookupModule):
                         inp.send_keys(addr["bunji"])
                         break
 
-            # 동/호
+            # 동/호 — 여러 변환 조합을 시도하여 결과 찾기
             dong_no = addr.get("dong_no", "")
             ho_no = addr.get("ho_no", "")
-            _fill_dong_ho(driver, dong_no, ho_no)
-            time.sleep(0.5)
-
-            # 캡차 처리
             anticaptcha_key = os.getenv("ANTICAPTCHA_API_KEY", "")
-            _solve_captcha_anticaptcha(driver, anticaptcha_key, logs)
-            time.sleep(0.5)
 
-            # 검색 실행 및 결과 수집
-            results, evidence = _click_search_and_extract(driver, logs)
+            variations = _generate_dong_ho_variations(dong_no, ho_no)
+            results = []
+            evidence = None
 
-            # 재시도: 호만 입력했는데 결과 없으면 동=1로 재시도
-            if not results and ho_no and not dong_no:
+            for vi, (try_dong, try_ho) in enumerate(variations):
+                if vi > 0:
+                    logs.append(f"동호 변환 재시도 [{vi+1}/{len(variations)}]: 동={try_dong!r} 호={try_ho!r}")
+
+                _fill_dong_ho(driver, try_dong, try_ho)
+                time.sleep(0.2)
+
+                # 매 시도마다 캡차 새로 풀기
+                _solve_captcha_anticaptcha(driver, anticaptcha_key, logs)
+                time.sleep(0.2)
+
+                results, evidence = _click_search_and_extract(driver, logs)
+
+                if results:
+                    if vi > 0:
+                        logs.append(f"동호 변환 성공: 동={try_dong!r} 호={try_ho!r}")
+                    break
+
+                # 실패 시 body 메시지 확인 — "조회되지 않습니다"는 주소 자체가 없으므로 재시도 무의미
                 body_text = driver.find_element(By.TAG_NAME, "body").text
-                if "존재하지 않습니다" in body_text or "호를 입력" in body_text:
-                    logs.append("동 미입력 → 동=1로 재시도")
-                    _fill_dong_ho(driver, "1", ho_no)
-                    time.sleep(0.5)
-                    results, evidence = _click_search_and_extract(driver, logs)
+                if "조회되지 않습니다" in body_text:
+                    logs.append("주소 자체 조회 불가 — 동호 변환 중단")
+                    break
+
+                # 최대 5회까지만 시도 (캡차 비용 절약)
+                if vi >= 4:
+                    logs.append(f"동호 변환 5회 시도 완료 — 중단 (남은 {len(variations)-vi-1}건 스킵)")
+                    break
 
             # 테이블에 없는 키를 입력 주소에서 보충
             lot_str = addr.get("bonji", "")
@@ -621,7 +747,7 @@ def _click_search_and_extract(driver, logs):
                 driver.execute_script("arguments[0].click();", btn)
                 break
 
-    time.sleep(3)
+    time.sleep(1)
 
     try:
         alert = driver.switch_to.alert
