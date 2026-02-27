@@ -12,5 +12,6 @@ flask-sqlalchemy
 flask-session
 flask-wtf
 flask-limiter
+email-validator
 psycopg2-binary
 bcrypt
