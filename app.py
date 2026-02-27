@@ -53,8 +53,6 @@ register_cli(app)
 # 로그인 rate limiting (15분당 10회)
 limiter.limit("10 per 15 minutes")(app.view_functions["auth.login"])
 
-# API 라우트 CSRF 면제 — 모든 라우트 등록 후 파일 하단에서 설정
-
 # 모듈 초기화
 wetax_module = WeTaxModule()
 etax_module = SeoulETaxModule()
@@ -1024,11 +1022,10 @@ def _dict_to_result(d: dict) -> LookupResult:
     )
 
 
-# ─── API 라우트 CSRF 면제 ───
+# ─── API 라우트 CSRF 면제 (외부 연동 전용) ───
+# api_search: WillSave 외부 연동용 POST API — 브라우저 세션 아닌 서버간 통신
 # Flask-WTF 1.2.x는 string이 아닌 view function 참조로만 exempt 매칭됨
-for _ep in ("api_search", "api_address_search",
-            "batch_upload", "batch_parse", "batch_start", "batch_cancel"):
-    csrf.exempt(app.view_functions[_ep])
+csrf.exempt(app.view_functions["api_search"])
 
 
 if __name__ == "__main__":

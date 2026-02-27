@@ -1,6 +1,9 @@
 (function () {
   "use strict";
 
+  // ─── CSRF 토큰 ───
+  var csrfToken = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
+
   // ─── DOM 요소 ───
   var dropZone = document.getElementById("dropZone");
   var fileInput = document.getElementById("fileInput");
@@ -157,7 +160,11 @@
     formData.append("file", fileInput.files[0]);
 
     try {
-      var resp = await fetch("/batch/upload", { method: "POST", body: formData });
+      var resp = await fetch("/batch/upload", {
+        method: "POST",
+        headers: { "X-CSRFToken": csrfToken },
+        body: formData,
+      });
       var data = await resp.json();
 
       document.getElementById("uploadProgress").style.display = "none";
@@ -337,7 +344,7 @@
     try {
       var resp = await fetch("/batch/parse", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
         body: JSON.stringify({
           upload_id: uploadId,
           address_col: parseInt(addressColInput.value, 10),
@@ -475,7 +482,7 @@
     try {
       var resp = await fetch("/batch/start", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
         body: JSON.stringify({
           upload_id: uploadId,
           pdf_name_pattern: pdfPattern,
@@ -524,7 +531,10 @@
       cancelBtn.disabled = true;
       cancelBtn.textContent = "중지 요청 중...";
       try {
-        await fetch("/batch/cancel/" + jobId, { method: "POST" });
+        await fetch("/batch/cancel/" + jobId, {
+          method: "POST",
+          headers: { "X-CSRFToken": csrfToken },
+        });
       } catch (err) {
         // 네트워크 오류 무시
       }
