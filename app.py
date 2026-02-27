@@ -233,6 +233,8 @@ def _resolve_pnu(addr: dict, address_str: str) -> dict:
 def _display_address(base: str, dong_no: str = "", ho_no: str = "") -> str:
     """주소에 동/호 정보를 붙여 표시용 문자열을 만든다."""
     addr = (base or "").strip()
+    if not addr:
+        return ""
     parts = []
     if dong_no:
         parts.append(f"{dong_no}동")
