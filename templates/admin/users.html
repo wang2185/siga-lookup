@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}사용자 관리 — 시가 조회 포털{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="result-header">
+    <h1>사용자 관리</h1>
+    <a href="{{ url_for('auth.user_create') }}" class="btn btn-primary" style="width:auto; padding:10px 20px; font-size:0.9rem;">새 사용자 추가</a>
+  </div>
+
+  <div class="batch-preview-wrapper">
+    <table class="result-table">
+      <thead>
+        <tr>
+          <th>이름</th>
+          <th>이메일</th>
+          <th>역할</th>
+          <th>상태</th>
+          <th>생성일</th>
+          <th>관리</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td>{{ user.full_name }}</td>
+          <td>{{ user.email }}</td>
+          <td><span class="role-badge role-{{ user.role }}">{{ role_labels.get(user.role, user.role) }}</span></td>
+          <td>
+            {% if user.is_active %}
+            <span class="status-badge status-active">활성</span>
+            {% else %}
+            <span class="status-badge status-inactive">비활성</span>
+            {% endif %}
+          </td>
+          <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
+          <td>
+            {% if current_user.can_manage(user) %}
+            <div class="admin-actions">
+              <a href="{{ url_for('auth.user_edit', user_id=user.id) }}" class="btn-sm btn-secondary">수정</a>
+              <form method="POST" action="{{ url_for('auth.user_toggle', user_id=user.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                {% if user.is_active %}
+                <button type="submit" class="btn-sm btn-danger" onclick="return confirm('{{ user.full_name }} 계정을 비활성화하시겠습니까?')">비활성화</button>
+                {% else %}
+                <button type="submit" class="btn-sm btn-success">활성화</button>
+                {% endif %}
+              </form>
+            </div>
+            {% elif current_user.id == user.id %}
+            <span class="text-muted">본인</span>
+            {% else %}
+            <span class="text-muted">-</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="btn-group">
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">돌아가기</a>
+  </div>
+</div>
+{% endblock %}

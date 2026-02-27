@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}로그인 — 시가 조회 포털{% endblock %}
+
+{% block content %}
+<div class="login-wrapper">
+  <div class="card login-card">
+    <h1>시가 조회 포털</h1>
+    <p class="subtitle">로그인하여 시작하세요</p>
+
+    <form method="POST" action="{{ url_for('auth.login', next=request.args.get('next', '')) }}" novalidate>
+      {{ form.hidden_tag() }}
+
+      <div class="form-group">
+        <label for="email">이메일</label>
+        <input type="email" id="email" name="email" value="{{ form.email.data or '' }}"
+               placeholder="이메일 주소를 입력하세요" autocomplete="email" autofocus required>
+        {% if form.email.errors %}
+        <div class="field-error">{{ form.email.errors[0] }}</div>
+        {% endif %}
+      </div>
+
+      <div class="form-group">
+        <label for="password">비밀번호</label>
+        <input type="password" id="password" name="password"
+               placeholder="비밀번호를 입력하세요" autocomplete="current-password" required>
+        {% if form.password.errors %}
+        <div class="field-error">{{ form.password.errors[0] }}</div>
+        {% endif %}
+      </div>
+
+      <button type="submit" class="btn btn-primary">로그인</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

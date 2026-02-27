@@ -4,8 +4,15 @@ Flask + 모듈별 조회 (WeTax/ETAX/data.go.kr/HomeTax)
 """
 
 from flask import Flask, render_template, request, jsonify, session, send_file
+from flask_login import login_required
+from flask_session import Session
+from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from config import Config
+from models import db
+from auth import auth_bp, login_manager, register_cli
 from modules.base import PROPERTY_TYPES, LookupResult, SOURCE_INFO
 from modules.address import (
     parse_address, search_juso, search_vworld, extract_address_components,
@@ -30,6 +37,29 @@ from modules.batch import (
 app = Flask(__name__)
 app.config.from_object(Config)
 app.secret_key = Config.SECRET_KEY
+
+# ─── 확장 초기화 ───
+db.init_app(app)
+app.config["SESSION_SQLALCHEMY"] = db
+Session(app)
+login_manager.init_app(app)
+csrf = CSRFProtect(app)
+limiter = Limiter(get_remote_address, app=app, default_limits=[])
+
+# 블루프린트 등록
+app.register_blueprint(auth_bp)
+register_cli(app)
+
+# 로그인 rate limiting (15분당 10회)
+limiter.limit("10 per 15 minutes")(app.view_functions["auth.login"])
+
+# API 라우트 CSRF 면제
+csrf.exempt("api_search")
+csrf.exempt("api_address_search")
+csrf.exempt("batch_upload")
+csrf.exempt("batch_parse")
+csrf.exempt("batch_start")
+csrf.exempt("batch_cancel")
 
 # 모듈 초기화
 wetax_module = WeTaxModule()
@@ -341,6 +371,7 @@ def perform_search(address_str: str, property_type: str = "", year: str = "",
 # ─── 메인 라우트 ───
 
 @app.route("/")
+@login_required
 def index():
     return render_template(
         "index.html",
@@ -350,6 +381,7 @@ def index():
 
 
 @app.route("/search", methods=["POST"])
+@login_required
 def search():
     property_type = request.form.get("property_type", "")
     year = request.form.get("year", "").strip()
@@ -571,6 +603,7 @@ def search():
 # ─── PDF 다운로드 ───
 
 @app.route("/download/pdf", methods=["POST"])
+@login_required
 def download_pdf():
     key = session.get("last_result_key")
     last = _load_pdf_data(key)
@@ -582,6 +615,7 @@ def download_pdf():
 
 
 @app.route("/download/auto-pdf", methods=["POST"])
+@login_required
 def download_auto_pdf():
     from modules.pdf import generate_auto_pdf_response
     key = session.get("last_auto_key")
@@ -593,6 +627,7 @@ def download_auto_pdf():
 
 
 @app.route("/download/evidence", methods=["POST"])
+@login_required
 def download_evidence():
     """조회 출처 증거 파일(ETAX 원본 PDF / WeTax 스크린샷)을 다운로드한다."""
     import io as _io
@@ -625,6 +660,7 @@ def download_evidence():
 # ─── 주소 API ───
 
 @app.route("/api/address/search")
+@login_required
 def api_address_search():
     keyword = request.args.get("q", "").strip()
     if len(keyword) < 2:
@@ -639,6 +675,7 @@ def api_address_search():
 # ─── JSON 시가조회 API (WillSave 연동용) ───
 
 @app.route("/api/search", methods=["POST"])
+@login_required
 def api_search():
     """JSON API for property price lookup (for WillSave integration)."""
     data = request.get_json(silent=True) or request.form
@@ -666,6 +703,7 @@ def api_search():
 # ─── ETAX 호환 라우트 (하위 호환) ───
 
 @app.route("/etax")
+@login_required
 def etax_index():
     get_dong_cache()
     return render_template(
@@ -677,6 +715,7 @@ def etax_index():
 
 
 @app.route("/etax/dongs")
+@login_required
 def etax_dongs():
     sigu_code = request.args.get("sigu", "")
     dong_cache = get_dong_cache()
@@ -685,6 +724,7 @@ def etax_dongs():
 
 
 @app.route("/etax/search", methods=["POST"])
+@login_required
 def etax_search_route():
     sigu_code = request.form.get("sigu_cd", "")
     hdong_code = request.form.get("hdong_cd", "")
@@ -723,6 +763,7 @@ def etax_search_route():
 # ─── 배치 (엑셀 일괄 조회) ───
 
 @app.route("/batch")
+@login_required
 def batch_index():
     return render_template(
         "batch.html",
@@ -731,6 +772,7 @@ def batch_index():
 
 
 @app.route("/batch/upload", methods=["POST"])
+@login_required
 def batch_upload():
     """Step 1: 파일만 받아서 헤더 + 미리보기를 반환한다."""
     file = request.files.get("file")
@@ -766,6 +808,7 @@ def batch_upload():
 
 
 @app.route("/batch/parse", methods=["POST"])
+@login_required
 def batch_parse():
     """Step 2: 컬럼 선택 → 주소 파싱·분리 결과 반환."""
     data = request.get_json(silent=True)
@@ -828,6 +871,7 @@ def batch_parse():
 
 
 @app.route("/batch/start", methods=["POST"])
+@login_required
 def batch_start():
     """Step 3: 캐시된 파싱 결과로 배치 작업을 시작한다."""
     data = request.get_json(silent=True)
@@ -861,6 +905,7 @@ def batch_start():
 
 
 @app.route("/batch/cancel/<job_id>", methods=["POST"])
+@login_required
 def batch_cancel(job_id):
     """배치 작업을 취소한다."""
     if cancel_job(job_id):
@@ -869,6 +914,7 @@ def batch_cancel(job_id):
 
 
 @app.route("/batch/download-cleaned/<upload_id>")
+@login_required
 def batch_download_cleaned(upload_id):
     """정리된 주소 엑셀을 다운로드한다."""
     import io as _io
@@ -886,6 +932,7 @@ def batch_download_cleaned(upload_id):
 
 
 @app.route("/batch/status/<job_id>")
+@login_required
 def batch_status(job_id):
     job = get_job(job_id)
     if not job:
@@ -904,6 +951,7 @@ def batch_status(job_id):
 
 
 @app.route("/batch/download/<job_id>")
+@login_required
 def batch_download(job_id):
     import io as _io
     job = get_job(job_id)
@@ -919,6 +967,7 @@ def batch_download(job_id):
 
 
 @app.route("/batch/download-excel/<job_id>")
+@login_required
 def batch_download_excel(job_id):
     """요약 엑셀만 별도 다운로드한다."""
     import io as _io
@@ -939,6 +988,7 @@ def batch_download_excel(job_id):
 
 
 @app.route("/batch/template")
+@login_required
 def batch_template():
     import io
     template_bytes = generate_sample_template()

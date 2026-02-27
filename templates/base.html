@@ -10,7 +10,31 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+  {% if current_user.is_authenticated %}
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a href="{{ url_for('index') }}" class="navbar-brand">시가 조회 포털</a>
+      <div class="navbar-right">
+        {% if current_user.role_level >= 2 %}
+        <a href="{{ url_for('auth.user_list') }}" class="navbar-link">사용자 관리</a>
+        {% endif %}
+        <span class="navbar-user">
+          {{ current_user.full_name }}
+          <span class="navbar-role">{{ current_user.role_label }}</span>
+        </span>
+        <a href="{{ url_for('auth.logout') }}" class="navbar-link navbar-logout">로그아웃</a>
+      </div>
+    </div>
+  </nav>
+  {% endif %}
   <div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
     {% block content %}{% endblock %}
   </div>
   <script src="{{ url_for('static', filename='js/address.js') }}"></script>

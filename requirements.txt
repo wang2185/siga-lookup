@@ -7,3 +7,10 @@ python-dotenv
 cachetools
 weasyprint
 openpyxl
+flask-login
+flask-sqlalchemy
+flask-session
+flask-wtf
+flask-limiter
+psycopg2-binary
+bcrypt
