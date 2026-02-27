@@ -310,12 +310,6 @@ class WeTaxModule(BaseLookupModule):
                         logs.append(f"동호 변환 성공: 동={try_dong!r} 호={try_ho!r}")
                     break
 
-                # "조회되지 않습니다" = 주소 자체가 없으므로 동호만 바꿔도 무의미
-                body_text = driver.find_element(By.TAG_NAME, "body").text
-                if "조회되지 않습니다" in body_text:
-                    logs.append("주소 자체 조회 불가 — 동호 변환 중단")
-                    break
-
             # 테이블에 없는 키를 입력 주소에서 보충
             lot_str = addr.get("bonji", "")
             if addr.get("bunji"):
