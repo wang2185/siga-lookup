@@ -674,8 +674,49 @@ def start_batch_job_from_parsed(
 _UNSAFE_FNAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+def _format_price_for_filename(price: str) -> str:
+    """시가 금액을 파일명용으로 포맷한다.
+
+    예: "1234567890" → "12억3456만", "5000000" → "500만", "0" → ""
+    """
+    if not price:
+        return ""
+    str_price = str(price)
+    # float 문자열 처리 ("150000.0" → 150000, 소수점 이하 버림)
+    try:
+        val = int(float(str_price.replace(',', '')))
+    except (ValueError, TypeError, OverflowError):
+        return ""
+    if val == 0:
+        return ""
+    parts = []
+    if val >= 100_000_000:
+        parts.append(f"{val // 100_000_000}억")
+        val %= 100_000_000
+    if val >= 10_000:
+        parts.append(f"{val // 10_000}만")
+    elif not parts:
+        # 1만 미만이고 억도 없는 경우만 원래 숫자 표시
+        parts.append(str(val))
+    return "".join(parts)
+
+
+def _format_share_korean(share_display: str) -> str:
+    """지분 표시를 한국어 형식으로 변환한다.
+
+    예: "1/2" → "2분의1", "3/10" → "10분의3", "100%" → "100%"
+    """
+    if not share_display:
+        return ""
+    m = re.match(r'^\s*(\d+)\s*/\s*(\d+)\s*$', share_display)
+    if m:
+        return f"{m.group(2)}분의{m.group(1)}"
+    return share_display
+
+
 def _make_pdf_filename(pattern: str, idx: int, owner: str, address: str,
-                       year: str, share_display: str) -> str:
+                       year: str, share_display: str,
+                       price: str = "") -> str:
     """PDF 파일명을 패턴에 따라 생성한다."""
     # 주소 축약 (시구동 + 건물명 정도)
     addr_short = address
@@ -685,7 +726,8 @@ def _make_pdf_filename(pattern: str, idx: int, owner: str, address: str,
     name = name.replace("{소유자}", owner or "")
     name = name.replace("{주소}", addr_short)
     name = name.replace("{년도}", year or "")
-    name = name.replace("{지분}", share_display or "")
+    name = name.replace("{시가}", _format_price_for_filename(price))
+    name = name.replace("{지분}", _format_share_korean(share_display))
     # 파일명 정리
     name = _UNSAFE_FNAME_RE.sub("", name).strip()
     name = re.sub(r'_+', '_', name).strip('_')
@@ -935,13 +977,21 @@ def _process_batch(
             # PDF 생성
             if auto_sections and flask_app:
                 try:
+                    # 대표 시가 금액 추출 (건물 > 공동주택 > 개별주택 > 토지 순)
+                    rep_price = (
+                        result_row.get("building_total")
+                        or result_row.get("apt_price")
+                        or result_row.get("house_price")
+                        or result_row.get("land_total_price")
+                        or ""
+                    )
                     pdf_bytes = _generate_single_pdf(
                         flask_app, addr_str, year, auto_sections,
                         owner=owner, share_display=share_display,
                     )
                     fname = _make_pdf_filename(
                         pdf_name_pattern, idx, owner, addr_str,
-                        year, share_display,
+                        year, share_display, price=rep_price,
                     )
                     fpath = os.path.join(pdf_dir, fname)
                     with open(fpath, "wb") as f:

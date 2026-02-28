@@ -115,6 +115,11 @@ def parse_address(addr_str: str) -> dict:
         if m:
             result["ho_no"] = m.group(1)
             continue
+        # 영문+숫자 조합-숫자+호 (A09-0043호, B11-0201호)
+        m = re.match(r"^제?([A-Za-z]\d+)-(\d+)호$", token)
+        if m:
+            result["ho_no"] = m.group(1) + "-" + m.group(2)
+            continue
         # 영문-숫자+호 (C-2302호, A-502호 — 갤러리아팰리스 등)
         m = re.match(r"^제?([A-Za-z])-?(\d+)호$", token)
         if m:
@@ -136,10 +141,13 @@ def parse_address(addr_str: str) -> dict:
         result["bldg_name"] = " ".join(remaining)
 
     # "N-N호" 패턴에서 dong_no가 비어있으면 자동 분리 (제1-2108호 → dong=1, ho=2108)
+    # 단, 첫 부분이 숫자인 경우만 (A-1210 같은 영문 접두어는 원본 보존)
     if not result["dong_no"] and result["ho_no"] and "-" in result["ho_no"]:
         parts = result["ho_no"].split("-", 1)
-        result["dong_no"] = parts[0]
-        result["ho_no"] = parts[1]
+        if parts[0].isdigit():
+            result["dong_no"] = parts[0]
+            result["ho_no"] = parts[1]
+        # "A-1210" → ho_no="A-1210" 그대로 유지 (변환은 variation generator에서)
 
     # dong_no가 dong과 동일하면 클리어 (중복 행정동명: "개포동 ... 개포동 개포자이")
     if result["dong_no"] and result["dong"] and result["dong_no"] == result["dong"]:

@@ -2,6 +2,7 @@
 
 import base64
 import os
+import random
 import re
 import shutil
 import time
@@ -18,7 +19,8 @@ WETAX_URL = "https://www.wetax.go.kr/tcp/loi/J030401M01.do"
 
 # AntiCaptcha API
 _ANTICAPTCHA_URL = "https://api.anti-captcha.com"
-_CAPTCHA_MAX_RETRIES = 3
+_CAPTCHA_MAX_RETRIES = 3      # AntiCaptcha 슬롯 부족 시 재시도
+_CAPTCHA_WRONG_RETRIES = 3    # 캡차 오답 시 같은 동호에서 재시도
 
 # 시/도 약칭 → 정식 명칭 매핑 (WeTax 드롭다운은 정식 명칭 사용)
 _SIDO_FULL = {
@@ -68,6 +70,10 @@ def _generate_dong_ho_variations(dong_no: str, ho_no: str) -> list:
     # 0) 원본 그대로
     _add(dong, ho)
 
+    # 0-1) 숫자동+숫자호 → 합산 형식 우선 시도 (원본 "1-2108" 형식 보존)
+    if dong and ho and dong.isdigit() and ho.isdigit():
+        _add("", f"{dong}-{ho}")
+
     # 1) 한글동 → 영문 변환 (에이→A, 비→B, 씨→C ...)
     if dong:
         alpha = _KOR_TO_ALPHA.get(dong)
@@ -90,6 +96,20 @@ def _generate_dong_ho_variations(dong_no: str, ho_no: str) -> list:
                 _add(kor, num)
             _add("", letter + num)
             _add("", ho)
+            # 하이픈 포함 원본도 추가 (ho=B-239 → ("", "B-239"))
+            if "-" in ho:
+                _add("", ho)
+
+    # 2-1) ho에 영문+숫자 조합 접두어: ho=A09-0043 → dong=A09, ho=0043
+    if ho:
+        m = re.match(r'^([A-Za-z]\d+)[-]?(\d+)$', ho)
+        if m:
+            prefix, num = m.group(1), m.group(2)
+            _add(prefix, num)
+            stripped = num.lstrip('0') or '0'
+            if stripped != num:
+                _add(prefix, stripped)
+            _add("", prefix + num)
 
     # 3) ho에 한글 접두어: ho=씨1000 → dong=씨, ho=1000 / dong=C, ho=1000
     if ho:
@@ -102,9 +122,7 @@ def _generate_dong_ho_variations(dong_no: str, ho_no: str) -> list:
                 _add(alpha, num)
                 _add("", alpha + num)
 
-    # 4) dong+ho 합산: dong=101, ho=4304 → 호에 "101-4304"
-    if dong and ho and dong.isdigit() and ho.isdigit():
-        _add("", f"{dong}-{ho}")
+    # 4) (step 0-1로 이동됨 — _add의 seen 중복 방지로 자동 스킵)
 
     # 5) dong 비어있고 ho에 하이픈: ho=B-2423 → dong=B, ho=2423
     if not dong and ho and "-" in ho:
@@ -300,10 +318,37 @@ class WeTaxModule(BaseLookupModule):
                 _fill_dong_ho(driver, try_dong, try_ho)
                 time.sleep(0.2)
 
-                _solve_captcha_anticaptcha(driver, anticaptcha_key, logs)
-                time.sleep(0.2)
+                # 캡차 재시도 루프: 오답 시 같은 동호에서 재시도
+                for captcha_try in range(_CAPTCHA_WRONG_RETRIES):
+                    # 캡차 오답 후 DOM이 초기화될 수 있으므로 매번 동호 재입력
+                    if captcha_try > 0:
+                        _fill_dong_ho(driver, try_dong, try_ho)
+                        time.sleep(0.2)
 
-                results, evidence = _click_search_and_extract(driver, logs)
+                    captcha_ok, captcha_task_id = _solve_captcha_anticaptcha(
+                        driver, anticaptcha_key, logs
+                    )
+
+                    # 캡차 API 실패 시 검색 건너뛰고 재시도
+                    if not captcha_ok:
+                        logs.append(f"캡차 API 실패 — 재시도 [{captcha_try+1}/{_CAPTCHA_WRONG_RETRIES}]")
+                        time.sleep(random.uniform(1.0, 3.0))
+                        continue
+
+                    time.sleep(0.2)
+
+                    results, evidence, captcha_wrong = _click_search_and_extract(
+                        driver, logs
+                    )
+
+                    if captcha_wrong:
+                        # AntiCaptcha에 오답 보고 (환불 + 품질 개선)
+                        if captcha_task_id:
+                            _report_incorrect_captcha(anticaptcha_key, captcha_task_id)
+                        logs.append(f"캡차 오답 재시도 [{captcha_try+1}/{_CAPTCHA_WRONG_RETRIES}]")
+                        time.sleep(random.uniform(2.0, 5.0))
+                        continue  # 같은 동호에서 캡차만 재시도
+                    break  # 캡차 정답 (결과 유무와 무관)
 
                 if results:
                     if vi > 0:
@@ -539,11 +584,26 @@ def _wait_loading_done(driver, timeout=30):
         time.sleep(1)
 
 
+def _report_incorrect_captcha(api_key, task_id):
+    """AntiCaptcha에 캡차 오답을 보고한다 (환불 + 품질 개선)."""
+    try:
+        _requests.post(f"{_ANTICAPTCHA_URL}/reportIncorrectImageCaptcha", json={
+            "clientKey": api_key,
+            "taskId": task_id,
+        }, timeout=5)
+    except Exception:
+        pass
+
+
 def _solve_captcha_anticaptcha(driver, api_key, logs):
-    """WeTax 캡차 이미지를 AntiCaptcha로 풀어서 입력한다."""
+    """WeTax 캡차 이미지를 AntiCaptcha로 풀어서 입력한다.
+
+    Returns:
+        (success: bool, task_id: int|None) — task_id는 오답 보고용.
+    """
     if not api_key:
         logs.append("ANTICAPTCHA_API_KEY 미설정 — 캡차 미처리")
-        return False
+        return False, None
 
     # 캡차 이미지를 base64로 추출
     captcha_b64 = driver.execute_script("""
@@ -585,7 +645,7 @@ def _solve_captcha_anticaptcha(driver, api_key, logs):
 
     if not captcha_b64:
         logs.append("캡차 이미지를 찾을 수 없음")
-        return False
+        return False, None
 
     logs.append("캡차 이미지 추출 완료")
 
@@ -615,14 +675,14 @@ def _solve_captcha_anticaptcha(driver, api_key, logs):
             task_id = data.get("taskId")
             if not task_id:
                 logs.append(f"캡차 태스크 생성 실패: {data.get('errorDescription', '')}")
-                return False
+                return False, None
             break
         except Exception as e:
             logs.append(f"AntiCaptcha 요청 실패: {e}")
-            return False
+            return False, None
     else:
         logs.append("AntiCaptcha 슬롯 부족 — 재시도 소진")
-        return False
+        return False, None
 
     # 결과 대기 (최대 60초)
     answer = None
@@ -640,13 +700,13 @@ def _solve_captcha_anticaptcha(driver, api_key, logs):
                 answer = result.get("solution", {}).get("text", "")
                 break
             logs.append(f"캡차 풀기 오류: {result.get('errorDescription', '')}")
-            return False
+            return False, None
         except Exception:
             continue
 
     if not answer:
         logs.append("캡차 풀기 타임아웃")
-        return False
+        return False, None
 
     logs.append(f"캡차 답: {answer}")
 
@@ -692,7 +752,7 @@ def _solve_captcha_anticaptcha(driver, api_key, logs):
         logs.append("캡차 입력 완료")
     else:
         logs.append("캡차 입력란을 찾을 수 없음")
-    return filled
+    return filled, task_id
 
 
 def _dismiss_alerts(driver):
@@ -729,7 +789,12 @@ def _hide_security_popups(driver):
 
 
 def _click_search_and_extract(driver, logs):
-    """검색 버튼 클릭 → alert 처리 → 결과 추출 → 스크린샷 캡처."""
+    """검색 버튼 클릭 → alert 처리 → 결과 추출 → 스크린샷 캡처.
+
+    Returns:
+        (results, evidence, captcha_wrong) — captcha_wrong가 True이면
+        캡차 오답이므로 재시도 필요.
+    """
     logs.append("검색 실행")
     try:
         btn = driver.find_element(By.ID, "btnSrchBldsCpb")
@@ -742,11 +807,20 @@ def _click_search_and_extract(driver, logs):
 
     time.sleep(1)
 
+    captcha_wrong = False
     try:
         alert = driver.switch_to.alert
+        alert_text = alert.text or ""
+        # 캡차 오답 관련 키워드 감지
+        if any(kw in alert_text for kw in ("자동입력", "보안문자", "인증", "captcha")):
+            captcha_wrong = True
+            logs.append(f"캡차 오답 감지: {alert_text[:60]}")
         alert.accept()
     except Exception:
         pass
+
+    if captcha_wrong:
+        return [], None, True
 
     # 로딩 오버레이("업무데이터 수신중입니다") 완료 대기
     _wait_loading_done(driver, timeout=30)
@@ -757,14 +831,37 @@ def _click_search_and_extract(driver, logs):
     # 스크린샷 전 키보드 보안 팝업 제거
     _hide_security_popups(driver)
 
+    # 결과 테이블로 스크롤 + 전체 페이지 캡처
     evidence = None
     try:
-        evidence = driver.get_screenshot_as_png()
-        logs.append("스크린샷 캡처 완료")
-    except Exception:
-        pass
+        # 결과 영역으로 스크롤
+        driver.execute_script("""
+            var tbl = document.querySelector('.tbl_list, .tbl_wrap, table.list');
+            if (tbl) tbl.scrollIntoView({block: 'start'});
+            else window.scrollTo(0, document.body.scrollHeight / 2);
+        """)
+        time.sleep(0.3)
 
-    return results, evidence
+        # 전체 페이지 높이로 윈도우 확장 후 캡처
+        total_height = driver.execute_script("return document.body.scrollHeight")
+        viewport_width = driver.execute_script("return document.body.scrollWidth")
+        # 최소 900, 최대 5000
+        capture_height = min(max(total_height, 900), 5000)
+        driver.set_window_size(max(viewport_width, 1400), capture_height)
+        time.sleep(0.3)
+        driver.execute_script("window.scrollTo(0, 0)")
+        time.sleep(0.2)
+        evidence = driver.get_screenshot_as_png()
+        logs.append(f"전체 페이지 캡처 완료 ({viewport_width}x{capture_height})")
+    except Exception:
+        # 폴백: 기본 뷰포트 캡처
+        try:
+            evidence = driver.get_screenshot_as_png()
+            logs.append("뷰포트 캡처 (폴백)")
+        except Exception:
+            pass
+
+    return results, evidence, False
 
 
 # ─── 테이블 결과 dict 변환 ───
