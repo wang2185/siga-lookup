@@ -99,6 +99,11 @@ def _generate_dong_ho_variations(dong_no: str, ho_no: str) -> list:
             # 하이픈 포함 원본도 추가 (ho=B-239 → ("", "B-239"))
             if "-" in ho:
                 _add("", ho)
+            # num이 4자리 미만이면 0-패딩 버전 추가 (B235 → B0235)
+            if len(num) < 4:
+                padded = num.zfill(4)
+                _add("", letter + padded)
+                _add(letter, padded)
 
     # 2-1) ho에 영문+숫자 조합 접두어: ho=A09-0043 → dong=A09, ho=0043
     if ho:
@@ -148,6 +153,10 @@ def _generate_dong_ho_variations(dong_no: str, ho_no: str) -> list:
         _add(dong, stripped)
         if len(ho) < 4:
             _add(dong, ho.zfill(4))
+
+    # 7-1) dong이 영문 1자 + ho가 4자리 미만 숫자 → 합산 0-패딩 (B + 235 → B0235)
+    if dong and re.match(r'^[A-Za-z]$', dong) and ho and ho.isdigit() and len(ho) < 4:
+        _add("", dong.upper() + ho.zfill(4))
 
     # 8) dong 없이 ho만
     if dong and ho:
