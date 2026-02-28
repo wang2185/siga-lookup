@@ -525,41 +525,43 @@ def _select_option_containing(driver, select_id, keyword):
 
 
 def _fill_dong_ho(driver, dong_no, ho_no):
-    if dong_no:
-        did = _find_visible_input(driver, ["txtExstDongna"])
-        if did:
-            _fill_input(driver, did, dong_no)
-        else:
-            for inp in driver.find_elements(By.CSS_SELECTOR, "input[type='text']"):
-                if not inp.is_displayed():
-                    continue
-                attrs = " ".join([
-                    inp.get_attribute("placeholder") or "",
-                    inp.get_attribute("title") or "",
-                    inp.get_attribute("id") or "",
-                    inp.get_attribute("name") or "",
-                ])
-                if "동" in attrs and "읍" not in attrs and "stdg" not in attrs:
-                    inp.clear()
+    # 동 필드: 항상 클리어 후 입력 (이전 variation 잔여값 방지)
+    did = _find_visible_input(driver, ["txtExstDongna"])
+    if did:
+        _fill_input(driver, did, dong_no or "")
+    else:
+        for inp in driver.find_elements(By.CSS_SELECTOR, "input[type='text']"):
+            if not inp.is_displayed():
+                continue
+            attrs = " ".join([
+                inp.get_attribute("placeholder") or "",
+                inp.get_attribute("title") or "",
+                inp.get_attribute("id") or "",
+                inp.get_attribute("name") or "",
+            ])
+            if "동" in attrs and "읍" not in attrs and "stdg" not in attrs:
+                inp.clear()
+                if dong_no:
                     inp.send_keys(dong_no)
-                    break
+                break
 
-    if ho_no:
-        hid = _find_visible_input(driver, ["txtExstHoadr"])
-        if hid:
-            _fill_input(driver, hid, ho_no)
-        else:
-            for inp in driver.find_elements(By.CSS_SELECTOR, "input[type='text']"):
-                if not inp.is_displayed():
-                    continue
-                attrs = " ".join([
-                    inp.get_attribute("placeholder") or "",
-                    inp.get_attribute("title") or "",
-                    inp.get_attribute("id") or "",
-                    inp.get_attribute("name") or "",
-                ])
-                if "호" in attrs and "전화" not in attrs:
-                    inp.clear()
+    # 호 필드: 항상 클리어 후 입력
+    hid = _find_visible_input(driver, ["txtExstHoadr"])
+    if hid:
+        _fill_input(driver, hid, ho_no or "")
+    else:
+        for inp in driver.find_elements(By.CSS_SELECTOR, "input[type='text']"):
+            if not inp.is_displayed():
+                continue
+            attrs = " ".join([
+                inp.get_attribute("placeholder") or "",
+                inp.get_attribute("title") or "",
+                inp.get_attribute("id") or "",
+                inp.get_attribute("name") or "",
+            ])
+            if "호" in attrs and "전화" not in attrs:
+                inp.clear()
+                if ho_no:
                     inp.send_keys(ho_no)
                     break
 
