@@ -42,8 +42,8 @@ _NON_APT_KEYWORDS = ("오피스텔",)
 def parse_address(addr_str: str) -> dict:
     """자유형식 한국어 주소를 구조화된 딕셔너리로 파싱한다."""
     result = {
-        "sido": "", "sigungu": "", "sigungu_sub": "", "dong": "",
-        "bonji": "", "bunji": "", "bldg_name": "",
+        "sido": "", "sigungu": "", "sigungu_sub": "", "eup_myeon": "",
+        "dong": "", "bonji": "", "bunji": "", "bldg_name": "",
         "dong_no": "", "ho_no": "", "floor": "", "san": False,
     }
     tokens = addr_str.strip().split()
@@ -62,6 +62,9 @@ def parse_address(addr_str: str) -> dict:
             result["sigungu_sub"] = token
             continue
         if re.match(r".+[읍면동가리]$", token):
+            # 읍/면 이름 별도 저장 (화성시 팔탄면 → eup_myeon=팔탄)
+            if re.match(r".+[읍면]$", token):
+                result["eup_myeon"] = re.sub(r"[읍면]$", "", token)
             # 읍/면 뒤에 리가 오면 리를 dong으로 갱신 (부발읍 무촌리 → dong=무촌)
             if result["dong"] and re.match(r".+리$", token):
                 result["dong"] = re.sub(r"리$", "", token)
