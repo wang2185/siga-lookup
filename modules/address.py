@@ -46,7 +46,19 @@ def parse_address(addr_str: str) -> dict:
         "dong": "", "bonji": "", "bunji": "", "bldg_name": "",
         "dong_no": "", "ho_no": "", "floor": "", "san": False,
     }
-    tokens = addr_str.strip().split()
+    # 전처리: "[건물]서울" → "서울", (지분:...) 제거,
+    # "번길NNN건물명" → "번길 NNN 건물명" 공백 삽입
+    cleaned = addr_str.strip()
+    cleaned = re.sub(r"^\[건물\]", "", cleaned)
+    cleaned = re.sub(r"\s*\(지분:[^)]*\)", "", cleaned)
+    cleaned = re.sub(r"(번길)\s*(\d+)([가-힣]{2,})", r"\1 \2 \3", cleaned)
+    # "1211-32삼화씨티" → "1211-32 삼화씨티" (번지+건물명 공백 없음)
+    # 단, 1글자 접미사(호/동/층/리/면/읍/가)는 분리 안 함
+    cleaned = re.sub(r"(\d+-\d+)([가-힣]{2,})", r"\1 \2", cleaned)
+    # "30-3송도" → "30-3 송도"도 처리
+    cleaned = re.sub(r"(\d)([가-힣]{2,})", r"\1 \2", cleaned)
+
+    tokens = cleaned.split()
     remaining = []
 
     for token in tokens:
