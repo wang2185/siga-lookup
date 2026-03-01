@@ -76,10 +76,27 @@ def parse_address(addr_str: str) -> dict:
         if token == "산":
             result["san"] = True
             continue
+        # "산NNN" 또는 "산NNN-NNN" (산 번지가 붙어있는 경우)
+        if not result["bonji"] and re.match(r"^산\d+(-\d+)?$", token):
+            result["san"] = True
+            cleaned = token[1:]  # strip 산
+            parts = cleaned.split("-")
+            result["bonji"] = parts[0]
+            if len(parts) > 1:
+                result["bunji"] = parts[1]
+            continue
         # 번지 with suffix (64번지, 494-15번지)
         if not result["bonji"] and re.match(r"^\d+(-\d+)?번지$", token):
             cleaned = token[:-2]  # strip 번지
             parts = cleaned.split("-")
+            result["bonji"] = parts[0]
+            if len(parts) > 1:
+                result["bunji"] = parts[1]
+            continue
+        # 쉼표 제거 후 번지 체크 (역곡동 112, → 112)
+        token_clean = token.rstrip(",")
+        if not result["bonji"] and token_clean != token and re.match(r"^\d+(-\d+)?$", token_clean):
+            parts = token_clean.split("-")
             result["bonji"] = parts[0]
             if len(parts) > 1:
                 result["bunji"] = parts[1]
