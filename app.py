@@ -76,16 +76,28 @@ _os.makedirs(_PDF_CACHE_DIR, exist_ok=True)
 
 def _store_pdf_data(data: dict) -> str:
     """PDF용 데이터를 파일에 저장하고 키를 반환한다."""
+    # systemd-tmpfiles가 /tmp를 주기적으로 청소하므로 매번 디렉토리 보장
+    _os.makedirs(_PDF_CACHE_DIR, exist_ok=True)
     key = _uuid.uuid4().hex[:12]
     path = _os.path.join(_PDF_CACHE_DIR, f"{key}.json")
     with open(path, "w", encoding="utf-8") as f:
         _json.dump(data, f, ensure_ascii=False)
     # 오래된 파일 정리 (50개 초과 시)
-    files = sorted(
-        (_os.path.join(_PDF_CACHE_DIR, f) for f in _os.listdir(_PDF_CACHE_DIR) if f.endswith(".json")),
-        key=lambda p: _os.path.getmtime(p),
-    )
-    for old in files[:-50]:
+    # tmpfiles와 경합 가능 → mtime 조회 시점에도 try/except로 방어
+    candidates = []
+    try:
+        for f in _os.listdir(_PDF_CACHE_DIR):
+            if not f.endswith(".json"):
+                continue
+            p = _os.path.join(_PDF_CACHE_DIR, f)
+            try:
+                candidates.append((_os.path.getmtime(p), p))
+            except OSError:
+                continue
+    except OSError:
+        candidates = []
+    candidates.sort(key=lambda x: x[0])
+    for _mt, old in candidates[:-50]:
         try:
             _os.remove(old)
         except OSError:
@@ -95,6 +107,8 @@ def _store_pdf_data(data: dict) -> str:
 
 def _store_evidence(evidence_bytes: bytes, evidence_type: str) -> str:
     """증거 파일(PDF/PNG)을 저장하고 키를 반환한다."""
+    # systemd-tmpfiles가 /tmp를 주기적으로 청소하므로 매번 디렉토리 보장
+    _os.makedirs(_PDF_CACHE_DIR, exist_ok=True)
     key = _uuid.uuid4().hex[:12]
     ext = evidence_type or "bin"
     path = _os.path.join(_PDF_CACHE_DIR, f"{key}_evidence.{ext}")

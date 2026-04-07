@@ -128,6 +128,10 @@ def _generate_dong_ho_variations(dong_no: str, ho_no: str) -> list:
     if dong and ho and dong.isdigit() and ho.isdigit():
         _add("", f"{dong}-{ho}")
 
+    # 0-2) 한글 1글자 동 + 숫자 호 → 결합 (나+657 → 나657, 가+101 → 가101)
+    if dong and re.match(r'^[가-힣]$', dong) and ho and ho.isdigit():
+        _add("", dong + ho)
+
     # 1) 한글동 → 영문 변환 (에이→A, 비→B, 씨→C ...)
     if dong:
         alpha = _KOR_TO_ALPHA.get(dong)

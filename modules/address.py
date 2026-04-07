@@ -163,6 +163,18 @@ def parse_address(addr_str: str) -> dict:
             result["dong_no"] = m.group(1)
             result["ho_no"] = m.group(2)
             continue
+        # 건물명-동 분리 (지식산업센터-나, 상가-가 등)
+        # 2글자 이상 건물명 + 하이픈 + 한글 1글자(동 지정: 가,나,다...)
+        m = re.match(r"^(.{2,})-([가-힣])$", token)
+        if m and result["bonji"]:
+            remaining.append(m.group(1))
+            result["dong_no"] = m.group(2)
+            continue
+        # dong_no가 있고 ho_no가 없을 때 순수 숫자 → ho_no (657 등)
+        if (result["bonji"] and result["dong_no"] and not result["ho_no"]
+                and re.match(r"^\d+$", token)):
+            result["ho_no"] = token
+            continue
         m = re.match(r"^제?(\w+)층$", token)
         if m and not result["floor"]:
             result["floor"] = m.group(1)
