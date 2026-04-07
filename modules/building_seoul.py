@@ -119,13 +119,13 @@ class SeoulETaxModule(BaseLookupModule):
             )
 
         try:
-            results, _raw_html = etax_search(
+            results, raw_html = etax_search(
                 sigu_code, hdong_code, bonbun, bubun, tsj_gubun, year, dong, hosu
             )
             evidence = None
-            if results:
+            if results and raw_html:
                 evidence = _build_evidence_pdf(
-                    results, address.get("_raw", ""), year)
+                    raw_html, address.get("_raw", ""), year)
             return LookupResult(
                 success=True,
                 property_type=self.property_type,
@@ -221,90 +221,80 @@ def etax_search(sigu_code, hdong_code, bonbun, bubun="",
     return _parse_results(html), html
 
 
-def _build_evidence_pdf(results: list, address: str, year: str) -> bytes | None:
-    """ETAX 조회 결과를 증거용 PDF로 생성한다.
+def _etax_evidence_url_fetcher(url, timeout=10, ssl_context=None):
+    """ETAX 캡처 전용 URL fetcher.
 
-    원본 HTML의 rowspan 구조가 복잡하므로, 파싱된 결과로
-    깔끔한 플랫 테이블을 직접 생성한다.
+    etax.seoul.go.kr 자체 자산(CSS/이미지)과 폰트 CDN만 허용한다.
+    그 외 호스트와 file:// 등 로컬 스킴은 빈 응답으로 무시한다.
+    예외를 던지지 않아 단일 자산 실패가 PDF 렌더링 전체를 깨뜨리지 않는다.
     """
-    from datetime import datetime
+    from urllib.parse import urlparse
+    from weasyprint import default_url_fetcher
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        # file://, data:, javascript: 등은 모두 빈 응답으로 차단
+        return {"string": b"", "mime_type": "text/plain"}
+    allowed = {"etax.seoul.go.kr", "fonts.googleapis.com", "fonts.gstatic.com"}
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in allowed:
+        return {"string": b"", "mime_type": "text/plain"}
+    return default_url_fetcher(url, timeout=timeout, ssl_context=ssl_context)
+
+
+def _build_evidence_pdf(raw_html: str, address: str, year: str) -> bytes | None:
+    """ETAX 응답 HTML을 그대로 PDF로 캡처한다.
+
+    etax.seoul.go.kr가 반환한 원본 HTML을 base_url과 함께 WeasyPrint로
+    렌더링하여 실제 ETAX 사이트의 모습을 증거 PDF로 생성한다.
+    조회 메타정보(주소·기준년도·조회일시)는 상단 배너로 삽입한다.
+    """
+    if not raw_html:
+        return None
     try:
         from weasyprint import HTML as WpHTML
-        from .pdf import _safe_url_fetcher
     except ImportError:
         return None
 
-    if not results:
-        return None
-
+    from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # int 등 비문자열도 안전하게 escape (호출부가 항상 str을 보장하지는 않음)
+    safe_address = _html.escape(str(address) if address else "")
+    safe_year = _html.escape(str(year) if year else "전체")
 
-    _esc = _html.escape  # XSS / HTML injection 방지
+    # 조회 메타정보 헤더 배너 (원본 캡처임을 명시)
+    banner = (
+        '<div style="border:2px solid #c00;padding:10px;margin:0 0 12px 0;'
+        'font-family:\'Malgun Gothic\',\'Noto Sans KR\',sans-serif;font-size:10pt;'
+        'color:#333;background:#fff;">'
+        '<strong style="color:#c00;font-size:11pt;">'
+        '서울시 ETAX 주택외건물 시가표준액 — 원본 캡처</strong><br>'
+        f'조회 주소: {safe_address}<br>'
+        f'기준년도: {safe_year}<br>'
+        f'조회일시: {now}<br>'
+        '출처: 서울특별시 ETAX (etax.seoul.go.kr)'
+        '</div>'
+    )
 
-    # 테이블 행 생성
-    rows_html = ""
-    for i, row in enumerate(results, 1):
-        rows_html += f"""<tr>
-<td>{i}</td>
-<td>{_esc(str(row.get('year', '')))}</td>
-<td>{_esc(str(row.get('lot', '')))}</td>
-<td>{_esc(str(row.get('dong_no', '')))}</td>
-<td>{_esc(str(row.get('ho', '')))}</td>
-<td>{_esc(str(row.get('name', '')))}</td>
-<td style="font-weight:700;color:#c00;">{_esc(str(row.get('total', '')))}</td>
-<td>{_esc(str(row.get('area', '')))}</td>
-<td>{_esc(str(row.get('building', '')))}</td>
-<td>{_esc(str(row.get('land', '')))}</td>
-</tr>\n"""
-
-    safe_address = _esc(address)
-    safe_year = _esc(year or '전체')
-
-    wrapper = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap');
-  body {{ font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif; font-size: 10pt;
-         padding: 15mm; color: #333; }}
-  .header {{ border-bottom: 2px solid #c00; padding-bottom: 8px; margin-bottom: 16px; }}
-  .header h2 {{ color: #c00; margin: 0 0 4px 0; font-size: 14pt; }}
-  .meta {{ font-size: 9pt; color: #666; margin-bottom: 12px; }}
-  .count {{ font-weight: 600; margin-bottom: 8px; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-bottom: 16px; }}
-  th, td {{ border: 1px solid #ccc; padding: 4px 6px; text-align: center; }}
-  th {{ background: #f0f0f0; font-weight: 600; font-size: 8pt; }}
-  .footer {{ margin-top: 20px; padding-top: 8px; border-top: 1px solid #ccc;
-             font-size: 8pt; color: #999; text-align: center; }}
-</style></head><body>
-<div class="header">
-  <h2>서울시 ETAX 주택외건물 시가표준액 — 원본 조회 결과</h2>
-</div>
-<div class="meta">
-  조회 주소: {safe_address}<br>
-  기준년도: {safe_year}<br>
-  조회일시: {now}<br>
-  출처: 서울특별시 ETAX (etax.seoul.go.kr)
-</div>
-<p class="count">총 {len(results)}건</p>
-<table>
-<thead>
-<tr><th>#</th><th>년도</th><th>번지</th><th>동</th><th>호</th><th>물건명</th>
-<th>시가표준액 (총액)</th><th>면적 (m²)</th><th>건축물</th><th>시설</th></tr>
-</thead>
-<tbody>
-{rows_html}
-</tbody>
-</table>
-<div class="footer">
-  본 문서는 서울시 ETAX(etax.seoul.go.kr) 조회 결과 원본입니다.<br>
-  조회일시: {now}
-</div>
-</body></html>"""
+    # 상대 URL은 WeasyPrint의 base_url 파라미터로 해석되므로 <base> 태그 주입은 불필요.
+    # 메타정보 배너를 <body> 시작 직후에 삽입하여 PDF 첫 페이지에 표시한다.
+    # <body class="..."> 같이 속성이 붙은 경우도 매칭하도록 정규식 사용.
+    if re.search(r"<body[\s>]", raw_html, re.IGNORECASE):
+        injected = re.sub(
+            r"(<body[^>]*>)",
+            lambda m: m.group(1) + banner,
+            raw_html,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+    else:
+        # body가 없는 단편 HTML(테이블 등)은 표준 골격으로 감싼다
+        injected = f"<html><body>{banner}{raw_html}</body></html>"
 
     try:
         return WpHTML(
-            string=wrapper,
-            url_fetcher=_safe_url_fetcher,
+            string=injected,
+            base_url=ETAX_BASE + "/",
+            url_fetcher=_etax_evidence_url_fetcher,
         ).write_pdf()
     except Exception:
         return None
